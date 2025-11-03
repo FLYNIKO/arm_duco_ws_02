@@ -1,8 +1,0 @@
-prefix=/home/nvidia/arm_duco_ws/devel
-
-Name: key_input_pkg
-Description: Description of key_input_pkg
-Version: 0.0.0
-Cflags: -I/home/nvidia/arm_duco_ws/devel/include
-Libs: -L${prefix}/lib -lkey_input_pkg
-Requires: message_generation message_runtime rospy std_msgs
