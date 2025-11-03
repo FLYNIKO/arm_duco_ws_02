@@ -1,0 +1,8 @@
+prefix=/home/nvidia/arm_duco_ws/install
+
+Name: duco_control_pkg
+Description: Description of duco_control_pkg
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib 
+Requires: rospy std_msgs sensor_msgs geometry_msgs visualization_msgs message_runtime

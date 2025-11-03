@@ -1,0 +1,2 @@
+duco_control_pkg:key_input_pkg:rplidar_ros
+-DCATKIN_DEVEL_PREFIX=/home/nvidia/arm_duco_ws/devel -DCMAKE_INSTALL_PREFIX=/home/nvidia/arm_duco_ws/install -G Unix Makefiles
