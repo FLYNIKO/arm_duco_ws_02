@@ -173,7 +173,6 @@ class system_control:
         self.keys_subscriber = rospy.Subscriber('/key_input', KeyInput, self._keys_callback)
         self.H_info_subscriber = rospy.Subscriber('/left_radar/H_detection_info', LineDetectionArray, self._H_info_callback)
         self.line_detection_subscriber = rospy.Subscriber('/twin_radar/line_detection_info', LineDetectionArray, self._line_detection_callback)
-        self.main_line_detection_subscriber = rospy.Subscriber('/main_radar/line_detection_info', LineDetectionArray, self._main_line_detection_callback)
         self.obstacle_flags_subscriber = rospy.Subscriber('/obstacle_flags', ObstacleFlags, self._obstacle_flags_callback)
 
         self.emergency_stop_flag = False
@@ -577,30 +576,6 @@ class system_control:
             # rospy.logwarn("未找到 id=999 的目标线")
             pass
 
-    def _main_line_detection_callback(self, msg):
-        # 处理 /main_radar/line_detection_info 消息，与 _line_detection_callback 逻辑一致
-        self.main_line_detection = msg
-        self.last_main_line_time = time.time()
-        
-        # 查找 id=999 的 line
-        target_line = None
-        for line in msg.lines:
-            target_line = line
-        
-        if target_line is not None:
-            if target_line.start_point.y > target_line.end_point.y:
-                self.column_right_point = target_line.start_point
-                self.column_left_point = target_line.end_point
-                self.column_deg = target_line.angle_deg
-            else:
-                self.column_right_point = target_line.end_point
-                self.column_left_point = target_line.start_point
-                self.column_deg = target_line.angle_deg
-        else:
-            self.column_right_point = None
-            self.column_left_point = None
-            self.column_deg = None
-
     def _obstacle_flags_callback(self, msg):
         self.obstacle_flags = msg
         self.last_ob_time = time.time()
@@ -865,6 +840,164 @@ class system_control:
         self.H_find_flag = False
         
         tcp_pos = self.duco_cobot.get_tcp_pose()
+        self.running_state = 201
+        # 设置寻找模式
+        self.find_mode = True
+        rospy.loginfo(" |-| 进入寻找模式，等待收集H检测信息...")
+        self.find_mode = True
+        rospy.sleep(5)
+        # 第二步：等待H_find_flag为True
+        start_time = time.time()
+        while not self.H_find_flag:
+            if self.emergency_stop_flag:
+                rospy.logwarn("检测到急停信号，停止寻找钢梁中心位置！")
+                self.find_mode = False
+                return
+            # if self.ob_flag:
+            #     rospy.logwarn(" |-| 检测到障碍物，无法寻找喷涂位姿！")
+            #     self.find_mode = False
+            #     return
+            
+            # 检查是否超时（60秒）
+            if time.time() - start_time > 60:
+                rospy.logwarn(" |-| 等待H检测处理结果超时（60秒），无法寻找喷涂位姿！")
+                self.find_mode = False
+                return
+                
+            rospy.sleep(0.001)  # 短暂等待，避免占用过多CPU
+        
+        if not self.find_mode:
+            return
+            
+        # 第三步：开始执行寻找喷涂位姿的动作
+        rospy.loginfo(" |-| 开始寻找喷涂位姿,请确保机械臂在目标梁中间或上方")
+        
+        center_pos = []
+        tcp_pos = self.duco_cobot.get_tcp_pose()
+
+        self.center_z = tcp_pos[2] - self.start_z + self.web_length / 2
+        self.center_x = tcp_pos[0] + self.painting_dist - self.web_distance
+        rospy.loginfo(f"center_x: {self.center_x}, center_z: {self.center_z}")
+        self.duco_cobot.movel([self.center_x, tcp_pos[1], self.center_z, tcp_pos[3], tcp_pos[4], tcp_pos[5]], self.vel, self.acc, 0, '', '', '', True)
+        self.paint_motion = 3
+        rospy.sleep(0.5)
+        rospy.loginfo(" |-| 移动到center位姿完成，准备计算其余位姿")
+
+        tcp_pos = self.duco_cobot.get_tcp_pose()
+        self.paint_center = tcp_pos # 喷涂中心点
+
+        # 喷涂上表面
+        web_top_x = tcp_pos[0] - self.painting_dist
+        web_top_z = tcp_pos[2] + self.web_height/2
+        web_bottom_x = web_top_x
+        web_bottom_z = web_top_z - self.web_height
+        print(f"web_top_x: {web_top_x}, web_top_z: {web_top_z}")
+        self.surface_painting_dist = self.painting_dist
+        self.flange_painting_dist = self.painting_dist - self.flange_painting_dist_adjust
+        # 喷涂上表面
+        # (self.point_on_circle(web_top_x, web_top_z, self.surface_painting_dist, self.painting_deg_surface)[0])
+        self.paint_top = [
+            self.paint_center[0],
+            tcp_pos[1],
+            (self.point_on_circle(web_top_x, web_top_z, self.surface_painting_dist, self.painting_deg_surface)[1]),
+            tcp_pos[3], tcp_pos[4], tcp_pos[5]] 
+        # 喷涂上翼面
+        # (self.point_on_circle(web_top_x, web_top_z, self.flange_painting_dist, -self.painting_deg_flange)[0])
+        self.paint_low = [
+            self.paint_center[0],
+            tcp_pos[1],
+            (self.point_on_circle(web_top_x, web_top_z, self.flange_painting_dist, -self.painting_deg_flange)[1]),
+            tcp_pos[3], tcp_pos[4], tcp_pos[5]] 
+
+        # 喷涂下表面
+        # (self.point_on_circle(web_bottom_x, web_bottom_z, self.surface_painting_dist, -self.painting_deg_surface)[0])
+        self.paint_bottom = [
+            self.paint_center[0],
+            tcp_pos[1],
+            (self.point_on_circle(web_bottom_x, web_bottom_z, self.surface_painting_dist, -self.painting_deg_surface)[1]),
+            tcp_pos[3], tcp_pos[4], tcp_pos[5]]
+        # 喷涂下翼面
+        # (self.point_on_circle(web_bottom_x, web_bottom_z, self.flange_painting_dist, self.painting_deg_flange)[0])
+        self.paint_high = [
+            self.paint_center[0],
+            tcp_pos[1],
+            (self.point_on_circle(web_bottom_x, web_bottom_z, self.flange_painting_dist, self.painting_deg_flange)[1]),
+            tcp_pos[3], tcp_pos[4], tcp_pos[5]] 
+        self.paint_top_X = self.point_on_circle(web_bottom_x, web_bottom_z, self.flange_painting_dist, self.painting_deg_flange)[0]
+        self.target_dist_in_flange = self.painting_dist - abs(abs(self.paint_top_X) - abs(self.paint_center[0]))
+        self.target_dist_in_web = self.painting_dist
+        rospy.loginfo("------ |-| 已找到5个喷涂位姿，选择位置开始喷涂！--------\n")
+        rospy.loginfo("   ↓       喷涂上表面位姿： %s" % self.paint_top)
+        rospy.loginfo("===== ↙    喷涂下翼面位姿： %s" % self.paint_high)
+        rospy.loginfo("  |     ←  喷涂中心位姿：  %s" % self.paint_center)
+        rospy.loginfo("===== ↖    喷涂上翼面位姿： %s" % self.paint_low)
+        rospy.loginfo("   ↑       喷涂下表面位姿： %s" % self.paint_bottom)
+        rospy.loginfo("\n------------------------------------------------")
+        self.position_flag = True
+        self.find_mode = False
+        self.running_state = 202
+        rospy.loginfo(" |-| 寻找喷涂位姿完成！")
+
+    def find_central_pos(self):
+        self.running_state = 200
+        self.position_flag = False
+        self.ob_status = 1
+        
+        self.H_find_flag = False
+        
+        tcp_pos = self.duco_cobot.get_tcp_pose()
+        start_z = tcp_pos[2]  # 当前 z 方向为上下
+
+        scan_data = []  # 保存 [z坐标, 距离值]
+
+        rospy.loginfo("从上到下开始扫描...")
+
+        steps = int(self.scan_range / self.step_size)
+        for i in range(steps):
+            # 向下移动一小步
+            if self.emergency_stop_flag:
+                rospy.logwarn("检测到急停信号，停止寻找钢梁中心位置！")
+                return
+            tcp_pos[2] = start_z - i * self.step_size
+            self.duco_cobot.movel(tcp_pos, self.vel, self.acc, 0, '', '', '', True)
+            rospy.sleep(0.05)
+
+            # 读取前向激光传感器
+            dist = self.get_directional_distance("right")
+            if dist > 0:
+                scan_data.append((tcp_pos[2], dist))  # 记录当前高度和距离值
+                rospy.loginfo(f"scan z={tcp_pos[2]:.3f}m, front={dist:.3f}m")
+
+        rospy.loginfo("扫描完成，开始检测突变边缘...")
+
+        edge_positions = []
+        for i in range(1, len(scan_data)):
+            if self.emergency_stop_flag:
+                print("检测到急停信号，停止寻找钢梁中心位置！")
+                return
+            prev = scan_data[i - 1][1]
+            curr = scan_data[i][1]
+            if abs(curr - prev) > self.min_jump_threshold:
+                z_pos = scan_data[i][0]
+                dist = scan_data[i][1]
+                edge_positions.append((z_pos, dist))
+
+        if len(edge_positions) >= 2:
+            top_edge = edge_positions[0][0]
+            bottom_edge = edge_positions[-1][0]
+            center_z = (top_edge + bottom_edge) / 2
+
+            # 计算目标末端位置
+            center_pos = list(self.duco_cobot.get_tcp_pose())
+            center_pos[2] = center_z
+
+            # 移动到目标位置
+            self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
+            # 计算当前喷涂距离，并移动到目标喷涂距离
+            dist = self.get_directional_distance("right")
+            center_pos[0] -= dist - 0.35
+            self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
+            self.paint_center = center_pos
 
         self.running_state = 201
         # 设置寻找模式
@@ -983,112 +1116,13 @@ class system_control:
         rospy.loginfo("   ↑       喷涂下表面位姿： %s, 喷涂摆动角度： %s" % (self.paint_bottom, self.spray_swinging_bottom))
         rospy.loginfo("\n------------------------------------------------")
 
+
+
         self.position_flag = True
         self.find_mode = False
         self.running_state = 202
         rospy.loginfo(" |-| 寻找喷涂位姿完成！")
-
-    def find_central_pos(self):
-        self.running_state = 200
-        self.position_flag = False
-        self.ob_status = 1
-        
-        self.H_find_flag = False
-        
-        tcp_pos = self.duco_cobot.get_tcp_pose()
-        
-        if self.paint_object == 0:
-            #横_工字梁：第一步：扫描钢梁中心位置
-            start_z = tcp_pos[2]  # 当前 z 方向为上下
-
-            scan_data = []  # 保存 [z坐标, 距离值]
-
-            rospy.loginfo("从上到下开始扫描...")
-
-            steps = int(self.scan_range / self.step_size)
-            for i in range(steps):
-                # 向下移动一小步
-                if self.emergency_stop_flag:
-                    rospy.logwarn("检测到急停信号，停止寻找钢梁中心位置！")
-                    return
-                tcp_pos[2] = start_z - i * self.step_size
-                self.duco_cobot.movel(tcp_pos, self.vel, self.acc, 0, '', '', '', True)
-                rospy.sleep(0.05)
-
-                # 读取前向激光传感器
-                dist = self.get_directional_distance("right")
-                if dist > 0:
-                    scan_data.append((tcp_pos[2], dist))  # 记录当前高度和距离值
-                    rospy.loginfo(f"scan z={tcp_pos[2]:.3f}m, front={dist:.3f}m")
-
-            rospy.loginfo("扫描完成，开始检测突变边缘...")
-
-            edge_positions = []
-            for i in range(1, len(scan_data)):
-                if self.emergency_stop_flag:
-                    print("检测到急停信号，停止寻找钢梁中心位置！")
-                    return
-                prev = scan_data[i - 1][1]
-                curr = scan_data[i][1]
-                if abs(curr - prev) > self.min_jump_threshold:
-                    z_pos = scan_data[i][0]
-                    dist = scan_data[i][1]
-                    edge_positions.append((z_pos, dist))
-
-            if len(edge_positions) >= 2:
-                top_edge = edge_positions[0][0]
-                bottom_edge = edge_positions[-1][0]
-                center_z = (top_edge + bottom_edge) / 2
-
-                # 计算目标末端位置
-                center_pos = list(self.duco_cobot.get_tcp_pose())
-                center_pos[2] = center_z
-
-                # 移动到目标位置
-                self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
-                # 计算当前喷涂距离，并移动到目标喷涂距离
-                dist = self.get_directional_distance("right")
-                center_pos[0] -= dist - 0.35
-                self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
-                self.paint_center = center_pos
-
-            self.find_central_pos_manual()
-        
-        elif self.paint_object == 1:
-            #竖_方柱：第一步：扫描钢梁中心位置
-            self.spray_swinging = [0, 0, 0, 0, 45, -45, 0, 0, 0, 0]
-            tcp_pos = self.duco_cobot.get_tcp_pose()
-            if self.column_right_point is not None and self.column_left_point is not None:
-                self.duco_cobot.movel([tcp_pos[0], tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.vel, self.acc, 0, '', '', '', True)
-                rospy.sleep(0.05)
-                if 85 < self.column_deg < 95:
-                    self.column_rad = math.radians(self.column_deg)
-                else: 
-                    self.column_rad = math.radians(90)
-
-                right_x = self.column_right_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
-                right_y = self.column_right_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1]
-                right_z = self.column_right_point.z + MAIN_RADAR_OFFSET[1] + tcp_pos[2]
-
-                left_x = self.column_left_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
-                left_y = self.column_left_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1]
-                left_z = self.column_left_point.z + MAIN_RADAR_OFFSET[1] + tcp_pos[2]
-
-                self.arm_column_right = [right_x, right_y, right_z, self.init_pos[3], self.init_pos[4], self.column_rad]
-                self.arm_column_left = [left_x, left_y, left_z, self.init_pos[3], self.init_pos[4], self.column_rad]
-                self.arm_column_center = [right_x, (right_y + left_y) / 2.0, right_z, self.init_pos[3], self.init_pos[4], self.column_rad]
-                rospy.loginfo("tcp_pos: %s" % tcp_pos)
-                rospy.loginfo("find points \n right: %s \n left: %s \n center: %s" % (self.arm_column_right, self.arm_column_left, self.arm_column_center))
-                self.duco_cobot.movel(self.arm_column_right, self.vel, self.acc, 0, '', '', '', True)
-                rospy.loginfo("move right")
-                self.position_flag = True
-            else:
-                self.arm_column_right = None
-                self.arm_column_left = None
-                self.arm_column_center = None
-                rospy.logwarn(" |-| 未找到钢梁中心位置，无法寻找喷涂位姿！")
-                return
-            
+                        
     def pid_dist_control(self, distance, target_dist, dt):
         v2 = 0.0  # x轴默认速度为0
         if distance != -1 and not self.clog_flag:
@@ -1116,13 +1150,16 @@ class system_control:
         rospy.loginfo("-----进入自动模式-----")
         self.running_state = 400
         self.autopaint_flag = True
+        v2 = 0.0  # 初始化前后速度
+        cur_time = time.time()
+        last_time = cur_time
 
+        if self.paint_motion == 0:            
+            self.running_state = 401
+            rospy.logwarn("| 当前机械臂不在喷涂位置，请先选择一个喷涂位置再开始自动程序 |")
+            return
 
-        if self.paint_object == 0:
-            v2 = 0.0  # 初始化前后速度
-            cur_time = time.time()
-            last_time = cur_time
-
+        else:
             while self.autopaint_flag:
                 if self.clog_flag:
                     self.ob_status = 1
@@ -1204,18 +1241,6 @@ class system_control:
                 # rospy.logdebug("v2: %f" % v2)
                 self.duco_cobot.speedl([0, 0, v2, 0, 0, 0], self.acc * 0.9, -1, False)
                 # self.duco_cobot.speedl([0, 0, 0, 0, 0, 0], self.acc * 0.9, -1, False)
-            
-        elif self.paint_object == 1:
-            if self.arm_column_right is not None and self.arm_column_left is not None and self.arm_column_center is not None:
-                
-                self.duco_cobot.movel(self.arm_column_right, self.vel, self.acc, 0, '', '', '', True)
-                
-                rospy.sleep(1)
-                self.duco_cobot.movel(self.arm_column_left, 0.1, self.acc, 0, '', '', '', True)
-                self.duco_cobot.movel([self.arm_column_left[0], self.arm_column_left[1], self.arm_column_left[2] - 0.5, self.arm_column_left[3], self.arm_column_left[4], self.arm_column_left[5]], 0.4, self.acc, 0, '', '', '', True)
-                self.duco_cobot.movel([self.arm_column_right[0], self.arm_column_right[1], self.arm_column_right[2] - 0.5, self.arm_column_right[3], self.arm_column_right[4], self.arm_column_right[5]], 0.1, self.acc, 0, '', '', '', True)
-                self.duco_cobot.movel(self.arm_column_right, 0.4, self.acc, 0, '', '', '', True)
-                # 实际运动，上下两行间隔1米
 
         self.running_state = 401
         rospy.loginfo("-----退出自动模式-----")

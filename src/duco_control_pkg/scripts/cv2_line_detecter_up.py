@@ -18,20 +18,20 @@ from duco_control_pkg.msg import LineInfo, LineDetectionArray
 class SeparateRadarLineDetector:
     def __init__(self):
         rospy.init_node('main_radar_line_detector')
-        self.debug_mode = DEBUG_MODE
+        self.debug_mode = True
         # Parameters for image conversion
         self.image_size = 800  # 适中的图像尺寸
         self.max_range = 1.0      # 适中的范围
         self.resolution = self.max_range / (self.image_size / 2)
         
         # 圆形处理范围参数
-        self.processing_radius_meters = 1.0  # 处理半径（米），只处理此范围内的数据
+        self.processing_radius_meters = 1  # 处理半径（米），只处理此范围内的数据
         self.processing_radius_pixels = int(self.processing_radius_meters / self.resolution)  # 转换为像素
         
         # Enhanced Hough line detection parameters (保持原有准确的参数)
         self.hough_threshold = 25
-        self.min_line_length = 40
-        self.max_line_gap = 40
+        self.min_line_length = 20
+        self.max_line_gap = 50
         
         # Edge detection parameters
         self.canny_low = 10
@@ -45,11 +45,11 @@ class SeparateRadarLineDetector:
         # Line tracking and stability parameters
         self.position_threshold = 0.5
         self.angle_threshold = 20
-        self.stability_requirement = 2  # 减少从3到2，更快达到稳定
+        self.stability_requirement = 1  # 减少从3到2，更快达到稳定
         self.max_line_age = 5
         
         # Advanced filtering parameters
-        self.min_line_length_meters = 0.15
+        self.min_line_length_meters = 0.05
         self.max_line_length_meters = 8.0
         self.angle_tolerance_deg = 75
         self.density_threshold = 0.6
@@ -674,12 +674,18 @@ class SeparateRadarLineDetector:
                         
                         # 角度检查：过滤掉90度左右的线（垂直线）
                         angle = props['angle_deg']
+                        current_lines.append({
+                                'image_coords': (x1, y1, x2, y2),
+                                'properties': props
+                            })
+                        '''
                         if not (angle >= (90 - self.angle_tolerance_deg) and
                                 angle <= (90 + self.angle_tolerance_deg)):
                             current_lines.append({
                                 'image_coords': (x1, y1, x2, y2),
                                 'properties': props
                             })
+                        '''
                 
                 
                 # 聚类相似线条
