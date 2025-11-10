@@ -81,6 +81,8 @@ class system_control:
         self.diy_point_flag = False
         self.car_flag = False # 车辆标志，True-避障，False-正常
         self.car_state = [8, 8] # 第一个是车辆启动状态，2-停车，8-开车 | 第二个是喷涂机喷涂状态，2-停喷，8-开喷
+        self.lift_state = [0, 0] # 升降机构状态，0-下降，1-上升 | 相对位置，上正下负
+        self.lift_flag = False
         self.running_state = 0
         self.car_direction = 0 # 车辆方向，0-前进，1-后退
 
@@ -724,12 +726,14 @@ class system_control:
         return self.directional_laser.get_distance(radar, direction)
     
     def get_car_state(self):
-        """
-        获取车辆状态信息
-        Returns:
-            list: 包含车辆状态信息的列表
-        """
-        return self.car_state, self.running_state, [self.get_distance("left", "front"), self.get_distance("right", "front"), self.get_distance("left", "up"), 0], self.spray_swinging
+        distances = [
+            self.get_distance("left", "front"), 
+            self.get_distance("right", "front"), 
+            self.get_distance("left", "up"), 
+            self.get_distance("left", "down")
+            ]
+
+        return self.car_state, self.running_state, distances, self.spray_swinging, self.lift_state
         
         # 读取/topic中的按键输入
     def _keys_callback(self, msg):
@@ -749,6 +753,7 @@ class system_control:
             self.painting_dist = self.latest_keys[9]/1000
             self.car_direction = self.latest_keys[10]
             self.paint_object = self.latest_keys[11]
+            self.lift_flag = self.latest_keys[12]
 
         # 按位解析
         return KeyInputStruct(
@@ -1225,6 +1230,21 @@ class system_control:
         # TODO: 自动喷涂，车辆不动机械臂动
         pass
 
+    def test_arm_move(self):
+        right_up_pos =      [-1.3, -0.5, 0.6, -1.57, 0.0, 1.57]
+        right_down_pos =    [-1.3, -0.5, -0.2, -1.57, 0.0, 1.57]
+        left_up_pos =       [-1.3, 0.5, 0.6, -1.57, 0.0, 1.57]
+        left_down_pos =     [-1.3, 0.5, -0.2, -1.57, 0.0, 1.57]
+        self.lift_state = [0, -80]
+
+        self.lift_state = [8, -80]
+        rospy.loginfo("down!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        rospy.sleep(5)
+        self.lift_state = [2, -80]
+
+
+
+
     def pos_move(self, aim_pos):
         if self.position_flag and aim_pos is not None:
             tcp_pos = self.duco_cobot.get_tcp_pose()
@@ -1314,7 +1334,8 @@ class system_control:
                 #自动喷涂
                 if key_input.start:
                     if not self.emergency_stop_flag:
-                        self.auto_paint_sync()
+                        self.test_arm_move()
+                        # self.auto_paint_sync()
                         # self.auto_paint_interval()
                 #堵枪清理
                 elif key_input.clog:

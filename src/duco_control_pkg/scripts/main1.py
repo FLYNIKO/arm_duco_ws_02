@@ -53,16 +53,19 @@ class DemoApp:
             empty_state = [0] * 4
             # 从 system_control 获取车辆状态
             if self.sys_ctrl is not None:
-                car_state, running_state, distances, spray_swinging = self.sys_ctrl.get_car_state()
+                car_state, running_state, distances, spray_swinging, lift_state = self.sys_ctrl.get_car_state()
             else:
+                tcp_pos = [0, 0, 0, 0, 0, 0]
+                tcp_state = [0, 0, 0, 0]
                 distances = [0, 0, 0, 0]
                 running_state = 0
                 car_state = [0, 0]
                 spray_swinging = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                lift_state = [0, 0]
             self.tcp_state = tcp_state
             # 发布 ROS topic
             msg = Float64MultiArray()
-            msg.data = tcp_state + tcp_pos + distances + car_state + [running_state] + spray_swinging
+            msg.data = tcp_state + tcp_pos + distances + car_state + [running_state] + spray_swinging + lift_state
             self.tcp_pub.publish(msg)
 
             self._stop_event.wait(0.2)
