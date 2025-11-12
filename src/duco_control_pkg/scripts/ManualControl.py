@@ -217,7 +217,7 @@ class system_control:
                     self.duco_stop.switch_mode(1)          
             self._stop_event.wait(0.05)
 
-    def ob_cross_check(self, direction):
+    def ob_cross_check(self, direction, delay_time):
         # 停车停喷
         self.car_state = [2, 2] 
         self.duco_ob.stop(True)
@@ -254,7 +254,7 @@ class system_control:
                     
             if jump_count >= 2:
                 rospy.loginfo("检测到第二次突变，退出循环")
-                rospy.sleep(1.7)
+                rospy.sleep(delay_time)
                 self.car_state = [2, 2]  # 车辆停车，喷涂机停喷
                 self.running_state = 821
                 self.ob_sidemotive_flag = False
@@ -334,7 +334,7 @@ class system_control:
                                 self.duco_ob.movel([tcp_pos[0], tcp_pos[1] - 0.1, tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
                                 
                                 if ob_data['left_mid'] and ob_data['left_rear'] and self.car_direction == 0:
-                                    self.ob_cross_check("right")
+                                    self.ob_cross_check("right", 3.5)
 
                                 elif ob_data['left_mid'] and self.car_direction == 0:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
@@ -374,7 +374,7 @@ class system_control:
                                 self.duco_ob.movel([tcp_pos[0], tcp_pos[1] + 0.1, tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
                                 
                                 if ob_data['right_mid'] and ob_data['right_rear'] and self.car_direction == 1:
-                                    self.ob_cross_check("left")
+                                    self.ob_cross_check("left", 5)
 
                                 elif ob_data['right_mid'] and self.car_direction == 1:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
@@ -977,7 +977,7 @@ class system_control:
         #上翼板
         self.spray_swinging_low = self.compute_spray_swinging_angle([self.paint_low[0], self.paint_low[2]], flange_top_front, [web_top_x, web_top_z])
         #中心点
-        self.spray_swinging_center = self.compute_spray_swinging_angle([self.paint_center[0], self.paint_center[2]], [web_top_x, web_top_z], [web_bottom_x, web_bottom_z])
+        self.spray_swinging_center = self.compute_spray_swinging_angle([self.paint_center[0], self.paint_center[2]], flange_top_front, flange_bottom_front)
 
         self.spray_swinging = self.spray_swinging_top + self.spray_swinging_low + self.spray_swinging_center + self.spray_swinging_high + self.spray_swinging_bottom
         rospy.loginfo("------ |-| 已找到5个喷涂位姿，选择位置开始喷涂！--------\n")
@@ -1212,9 +1212,10 @@ class system_control:
             
         elif self.paint_object == 1:
             if self.arm_column_right is not None and self.arm_column_left is not None and self.arm_column_center is not None:
-                
+                # 24度和-24度
+                self.car_state = [2, 2]
                 self.duco_cobot.movel(self.arm_column_right, self.vel, self.acc, 0, '', '', '', True)
-                
+                self.car_state = [2, 8]
                 rospy.sleep(1)
                 self.duco_cobot.movel(self.arm_column_left, 0.1, self.acc, 0, '', '', '', True)
                 self.duco_cobot.movel([self.arm_column_left[0], self.arm_column_left[1], self.arm_column_left[2] - 0.5, self.arm_column_left[3], self.arm_column_left[4], self.arm_column_left[5]], 0.4, self.acc, 0, '', '', '', True)
@@ -1323,6 +1324,7 @@ class system_control:
                 self.autopaint_flag = False
                 self.find_mode = False
                 self.ob_status = 1
+                self.car_state = [8, 8] # 车辆开车，喷涂机开喷
 
                 v0 = self.auto_vel                # arm left-/right+
                 v1 = self.auto_vel                 # arm up+/down-

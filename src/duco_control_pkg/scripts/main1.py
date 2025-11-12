@@ -47,28 +47,62 @@ class DemoApp:
     def thread_fun(self):
         self.duco_thread = DucoCobot(self.ip, PORT)
         self.duco_thread.open()
+
         while not self.stopheartthread:
-            tcp_pos = self.duco_thread.get_tcp_pose()
-            tcp_state = self.duco_thread.get_robot_state()
-            empty_state = [0] * 4
+            try:
+                # 尝试获取机械臂姿态
+                tcp_pos = self.duco_thread.get_tcp_pose()
+            except Exception as e:
+                # 若超时或通讯异常，则使用默认值
+                tcp_pos = [0, 0, 0, 0, 0, 0]
+                # 可选：打印一次警告（不要每次都打印，避免刷屏）
+                # rospy.logwarn_throttle(5, f"get_tcp_pose failed: {e}")
+
+            try:
+                tcp_state = self.duco_thread.get_robot_state()
+            except Exception as e:
+                tcp_state = [0, 0, 0, 0]
+                # rospy.logwarn_throttle(5, f"get_robot_state failed: {e}")
+
             # 从 system_control 获取车辆状态
             if self.sys_ctrl is not None:
-                car_state, running_state, distances, spray_swinging, lift_state = self.sys_ctrl.get_car_state()
+                try:
+                    car_state, running_state, distances, spray_swinging, lift_state = self.sys_ctrl.get_car_state()
+                except Exception as e:
+                    car_state = [0, 0]
+                    running_state = 0
+                    distances = [0, 0, 0, 0]
+                    spray_swinging = [0] * 10
+                    lift_state = [0, 0]
+                    # rospy.logwarn_throttle(5, f"get_car_state failed: {e}")
             else:
                 tcp_pos = [0, 0, 0, 0, 0, 0]
                 tcp_state = [0, 0, 0, 0]
                 distances = [0, 0, 0, 0]
                 running_state = 0
                 car_state = [0, 0]
-                spray_swinging = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                spray_swinging = [0] * 10
                 lift_state = [0, 0]
+
             self.tcp_state = tcp_state
-            # 发布 ROS topic
+
+            # 组装并发布 ROS 消息
             msg = Float64MultiArray()
-            msg.data = tcp_state + tcp_pos + distances + car_state + [running_state] + spray_swinging + lift_state
+            msg.data = (
+                tcp_state
+                + tcp_pos
+                + distances
+                + car_state
+                + [running_state]
+                + spray_swinging
+                + lift_state
+            )
+
             self.tcp_pub.publish(msg)
 
-            self._stop_event.wait(0.2)
+            # 每0.2秒循环一次
+            self._stop_event.wait(0.05)
+
         self.duco_thread.close()
 
     def run(self):
