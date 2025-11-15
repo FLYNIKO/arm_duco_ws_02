@@ -1009,8 +1009,8 @@ class StableRadarLineDetector:
                 
                 # 简单暴力合并相似线段
                 merged_lines = self.simple_merge_similar_lines(current_lines)
-                if self.debug_mode:
-                    print(f"After simple merging: {len(merged_lines)} lines")
+                #if self.debug_mode:
+                #    print(f"After simple merging: {len(merged_lines)} lines")
                 
                 # Detect H-beam structures using merged lines
                 h_beams, standalone_flanges, standalone_webs = self.detect_h_beam_structures(merged_lines)

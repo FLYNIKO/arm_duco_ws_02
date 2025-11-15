@@ -99,7 +99,7 @@ class system_control:
 
         self.column_height = 0
         self.column_start_lift_height = 0
-        self.column_start_arm_pos = []
+        self.column_start_arm_pos = None
         self.column_segment_info = {}
         self.column_segment_num = 0
         self.column_segment_length = 0
@@ -762,7 +762,7 @@ class system_control:
             self.car_direction = self.latest_keys[10]
             self.paint_object = self.latest_keys[11]
             self.lift_stop_flag = self.latest_keys[12]
-            self.lift_height = self.latest_keys[13] / 100 # CM -> M
+            self.lift_height = self.latest_keys[13] / 100 + 1.665 # CM -> M 地面到机械臂底座高度 1.3m
 
         # 按位解析
         return KeyInputStruct(
@@ -1008,8 +1008,8 @@ class system_control:
         优先选择段数少（段长尽量大）的方案
         区间: [52, 118] cm
         """
-        min_len = 52   # 每段最小长度 cm 对应角度25°
-        max_len = 118  # 每段最大长度 cm 对应角度45°
+        min_len = 0.52   # 每段最小长度 cm 对应角度25°
+        max_len = 1.18  # 每段最大长度 cm 对应角度45°
 
         best = None
         best_remainder = None
@@ -1049,7 +1049,7 @@ class system_control:
             "note": note
         }
 
-    def compute_spray_angle(self, column_segment_length, spray_distance=55):
+    def compute_spray_angle(self, column_segment_length, spray_distance=0.55):
         """
         根据喷涂段高计算喷嘴旋转角度（°）
         column_segment_length: 每段喷涂高度 (cm)
@@ -1060,6 +1060,28 @@ class system_control:
         theta_deg = math.degrees(theta_rad)
         return round(theta_deg, 2)
 
+    def compute_lift_moving_distance(self, lift_moving_distance):
+        """
+        防止升降机构碰到上下限位
+        使用绝对高度进行计算
+        上限位高度：3.15m
+        下限位高度：1.35m
+        """
+        lift_up_limit = 3.15
+        lift_down_limit = 1.665
+        if lift_moving_distance > 0 :
+            if self.lift_height + lift_moving_distance > lift_up_limit:
+                lift_moving_distance = lift_up_limit - self.lift_height - 0.02
+            else:
+                lift_moving_distance = lift_moving_distance
+
+        elif lift_moving_distance < 0:
+            if self.lift_height + lift_moving_distance < lift_down_limit:
+                lift_moving_distance = lift_down_limit - self.lift_height + 0.02
+            else:
+                lift_moving_distance = lift_moving_distance
+
+        return lift_moving_distance * 100 # m -> cm
 
     def find_painting_pos_column(self):
         self.running_state = 200
@@ -1072,14 +1094,17 @@ class system_control:
             return
 
         else:
-            self.column_height = int(self.get_distance("left", "down"))
+            self.column_height = self.get_distance("left", "down")
+            # 方柱喷涂初始升降机构高度
             self.column_start_lift_height = self.lift_height
             tcp_pos = self.duco_cobot.get_tcp_pose()
+            # 方柱喷涂初始机械臂位姿
             self.column_start_arm_pos = tcp_pos
-            if abs(self.column_height - self.column_start_lift_height - self.column_start_arm_pos[2]) > 0.1:
-                rospy.logwarn(" |-| 柱子高度与升降机构高度不一致，无法进行喷涂！")
-                self.running_state = 199
-                return
+            #if abs(self.column_height - self.column_start_lift_height - self.column_start_arm_pos[2]) > 0.1:
+            #    act_height = self.column_start_lift_height + self.column_start_arm_pos[2]
+            #    rospy.logwarn(f" |-| 柱子高度与升降机构高度不一致，无法进行喷涂！\n传感器高度：{self.column_height}\n实际计算高度：{act_height}")
+            #    self.running_state = 199
+            #    return
             
             self.column_segment_info = self.compute_spray_segments(self.column_height)
             # 计算总行数
@@ -1087,24 +1112,26 @@ class system_control:
             # 计算每行高度
             self.column_segment_length = self.column_segment_info["segment_length"]
             # 计算喷涂摆动角度
-            self.spray_swinging = [self.compute_spray_angle(self.column_segment_length), -self.compute_spray_angle(self.column_segment_length)]
+            self.spray_swinging = [self.compute_spray_angle(self.column_segment_length), -self.compute_spray_angle(self.column_segment_length),0,0,0,0,0,0,0,0]
             # 计算机械臂喷涂行数
             self.arm_segment_num = int((self.column_start_arm_pos[2] + 0.8) / self.column_segment_length) # 机械臂最低z轴高度 -0.8
 
             if 85 < self.column_deg < 95:
-                self.column_rad = math.radians(self.column_deg)
-            else: 
                 self.column_rad = math.radians(90)
+            else: 
+                self.column_rad = math.radians(self.column_deg)
 
             self.arm_column_right_x = self.column_right_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
-            self.arm_column_right_y = self.column_right_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1]
-            self.arm_column_right_z = self.column_right_point.z + MAIN_RADAR_OFFSET[1] + tcp_pos[2]
+            self.arm_column_right_y = self.column_right_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1] + 0.2
+            self.arm_column_right_z = tcp_pos[2]
 
             self.arm_column_left_x = self.column_left_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
-            self.arm_column_left_y = self.column_left_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1]
-            self.arm_column_left_z = self.column_left_point.z + MAIN_RADAR_OFFSET[1] + tcp_pos[2]
+            self.arm_column_left_y = self.column_left_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1] + 0.2
+            self.arm_column_left_z = tcp_pos[2]
+            rospy.loginfo(f"right:{self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z}")
+            rospy.loginfo(f"left:{self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z}")
 
-            rospy.loginfo(f"\n方柱喷涂\n喷涂总行数: {self.column_segment_num}\n每行高度: {self.column_segment_length}\n喷涂摆动角度: {self.spray_swinging[0]} ~ {self.spray_swinging[1]}")
+            rospy.loginfo(f"\n方柱喷涂\n喷涂总行数: {self.column_segment_num}\n每行高度: {self.column_segment_length}\n喷涂摆动角度: {self.spray_swinging[0]} ~ {self.spray_swinging[1]}\n 机械臂每次喷涂行数：{self.arm_segment_num}")
                     
         self.position_flag = True
         self.find_mode = False
@@ -1316,7 +1343,7 @@ class system_control:
 
             while self.autopaint_flag:
                 # 发送的数据是厘米，程序中计算用的是米，需要转换
-                self.lift_state = [2, lift_down_dist * 100]
+                self.lift_state = [2, self.compute_lift_moving_distance(lift_down_dist)]
                 if paint_column_num == 0 :
                     rospy.logwarn("方柱喷涂：喷涂方柱完成")
                     break
@@ -1333,23 +1360,24 @@ class system_control:
                     # 当前升降机构高度
                     now_lift_height = self.lift_height
                     # 如果喷涂次数大于0，并且升降机构实际下降距离 小于 升降机应当下降距离-0.05米，则执行
-                    if paint_round_num > 0 and abs(last_lift_height - now_lift_height) < lift_down_dist - 0.05:
+                    if paint_round_num > 0 and abs(last_lift_height - now_lift_height) < (abs(lift_down_dist) - 0.05):
                         rospy.logwarn("方柱喷涂：升降机构没有下降预期高度，调整机械臂姿态")
                         tcp_pos = self.duco_cobot.get_tcp_pose()
                         self.arm_column_left_z = last_paint_height - self.column_segment_length - self.lift_height 
                         self.arm_column_right_z = last_paint_height - self.column_segment_length - self.lift_height 
 
+                        rospy.loginfo(f"当前左z{self.arm_column_left_z},当前右z{self.arm_column_right_z}")
                         rospy.loginfo("方柱喷涂：开始计算喷涂路线")
                         arm_paint_column_list = []
                         for i in range(self.arm_segment_num):
                             if i % 2 == 1:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_right)
                                 arm_paint_column_list.append(self.arm_column_left)
                             else:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
                         vel_slow = 0.1
@@ -1366,7 +1394,7 @@ class system_control:
                         for i, point in enumerate(arm_paint_column_list[1:], start=1):
                             if self.emergency_stop_flag:
                                 break
-                            if i % 2 == 0:  # 偶数索引（即第 2, 4, 6... 个点）
+                            if i % 2 == 1:  # 偶数索引（即第 2, 4, 6... 个点）
                                 vel_use = vel_slow
                             else:            # 奇数索引（第 1, 3, 5... 个点）
                                 vel_use = vel_fast
@@ -1384,12 +1412,13 @@ class system_control:
                             last_paint_height = self.lift_height + tcp_pos[2]
                         # 刷新上一次升降机构高度
                         last_lift_height = self.lift_height
+                        rospy.loginfo(f"上次末端高度：{last_paint_height}, 上次升降机高度{last_lift_height}")
                         # 刷新喷涂次数
                         paint_round_num += 1
                         # 升降机下降
-                        self.lift_state = [8, lift_down_dist * 100]
+                        self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
                         rospy.sleep(2)
-                        rospy.logwarn("方柱喷涂：升降机正在下降")
+                        rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
 
 
 
@@ -1399,13 +1428,13 @@ class system_control:
                         arm_paint_column_list = []
                         for i in range(self.arm_segment_num):
                             if i % 2 == 1:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_right)
                                 arm_paint_column_list.append(self.arm_column_left)
                             else:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - ((i-1) * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
                         vel_slow = 0.1
@@ -1417,7 +1446,7 @@ class system_control:
                         self.duco_cobot.movel(start_point, self.vel, self.acc, 0, '', '', '', True)
                         # 车辆停车，喷涂机开喷
                         self.car_state = [2, 8]
-                        rospy.logwarn("方柱喷涂：开始喷涂方柱")
+                        rospy.loginfo("方柱喷涂：开始喷涂方柱")
                         # 从第二个点开始循环
                         for i, point in enumerate(arm_paint_column_list[1:], start=1):
                             if self.emergency_stop_flag:
@@ -1440,21 +1469,14 @@ class system_control:
                             last_paint_height = self.lift_height + tcp_pos[2]
                         # 刷新上一次升降机构高度
                         last_lift_height = self.lift_height
+                        
+                        rospy.loginfo(f"上次末端高度：{last_paint_height}, 上次升降机高度{last_lift_height}")
                         # 刷新喷涂次数
                         paint_round_num += 1
                         # 升降机下降
-                        self.lift_state = [8, lift_down_dist * 100]
+                        self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
                         rospy.sleep(2)
-                        rospy.logwarn("方柱喷涂：升降机正在下降")
-
-
-
-
-
-            
-
-
-
+                        rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
 
 
 
@@ -1535,7 +1557,7 @@ class system_control:
         
         self.paint_motion = 0
         # self.duco_cobot.movej2(self.init_pos, 2*self.vel, self.acc, 0, True)
-        self.duco_cobot.servoj_pose(self.init_pos, self.vel, self.acc, '', '', '', True)
+        self.duco_cobot.movel(self.init_pos, self.vel, self.acc, 0, '', '', '', True)
         self.running_state = 111
         rospy.loginfo("移动到初始位置: %s" % self.init_pos)
         rospy.loginfo("================================")
@@ -1571,13 +1593,33 @@ class system_control:
                 #自动喷涂
                 if key_input.start:
                     if not self.emergency_stop_flag:
-                        self.test_arm_move()
-                        # self.auto_paint_sync()
+                        # self.test_arm_move()
+                        self.auto_paint_sync()
                         # self.auto_paint_interval()
                 #堵枪清理
                 elif key_input.clog:
                     if not self.emergency_stop_flag:
-                        self.clog_function()
+                        if self.paint_object == 0:
+                            self.clog_function()
+                        elif self.paint_object == 1:
+                            if self.column_start_arm_pos is not None and self.column_start_lift_height != 0 :
+                                self.car_state = [2, 2]
+                                rospy.logwarn("等待机械臂回位")
+                                self.duco_cobot.movel(self.column_start_arm_pos, self.vel, self.acc, 0, '', '', '', True)
+                                self.lift_state = [2, self.compute_lift_moving_distance(self.column_start_lift_height - self.lift_height)]
+                                self.lift_state = [8, self.compute_lift_moving_distance(self.column_start_lift_height - self.lift_height)]
+                                now_time = time.time()
+                                while not self.lift_stop_flag:
+                                    rospy.logwarn("等待升降机构回位")
+                                    rospy.sleep(1)
+                                    if time.time() - now_time > 30:
+                                        rospy.logwarn("等待升降机构回位超时")
+                                        return
+                                    continue
+                            else:
+                                rospy.logwarn("没有点位，无法恢复")
+                                return
+
                 #寻找五个位姿
                 elif key_input.find:
                     if not self.emergency_stop_flag:
@@ -1611,7 +1653,9 @@ class system_control:
                 elif key_input.init:                    
                     self.ob_status = 1
                     self.running_state = 110
-                    self.duco_cobot.servoj_pose(self.init_pos, self.vel, self.acc, '', '', '', True)
+                    self.duco_cobot.movel(self.init_pos, self.vel, self.acc, 0, '', '', '', True)
+
+                    # self.duco_cobot.servoj_pose(self.init_pos, self.vel, self.acc, '', '', '', True)
                     self.running_state = 111
                     rospy.loginfo("移动到初始位置")
                     self.paint_motion = 0
@@ -1619,7 +1663,9 @@ class system_control:
                 elif key_input.serv:                    
                     self.ob_status = 1
                     self.running_state = 120
-                    self.duco_cobot.servoj_pose(self.serv_pos, self.vel, self.acc, '', '', '', True)
+                    self.duco_cobot.movel(self.serv_pos, self.vel, self.acc, 0, '', '', '', True)
+
+                    # self.duco_cobot.servoj_pose(self.serv_pos, self.vel, self.acc, '', '', '', True)
                     self.running_state = 121
                     rospy.loginfo("移动到维修位置")
                     self.paint_motion = 0

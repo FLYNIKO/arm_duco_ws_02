@@ -707,8 +707,8 @@ class SeparateRadarLineDetector:
                 self.update_stable_lines(stable_lines)
                 
                 # 调试输出
-                if self.debug_mode:
-                    rospy.loginfo(f"Main radar: {len(merged_lines)} lines detected, {len(stable_lines)} stable")
+                #if self.debug_mode:
+                #    rospy.loginfo(f"Main radar: {len(merged_lines)} lines detected, {len(stable_lines)} stable")
                 
                 # 发布结果
                 self.publish_scan_points(scan_points)
