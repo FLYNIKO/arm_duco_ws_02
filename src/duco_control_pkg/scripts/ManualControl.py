@@ -128,6 +128,7 @@ class system_control:
         self.web_height = 0 # 钢梁高度
         self.flange_up_width = 0 # 上翼子板宽度
         self.flange_down_width = 0 # 下翼子板宽度
+        self.paint_top_X = 0 # 喷涂上表面X坐标
 
         self.theta_deg = PAINTDEG / 2  # 喷涂角度的一半
         self.distance_to_cylinder = 0  # 末端与圆柱表面距离
@@ -573,7 +574,7 @@ class system_control:
                 target_line = line
                 break
         
-        if target_line is not None and self.position_flag:
+        if target_line is not None and self.position_flag and self.paint_object == 0:
             # 提取 distance 和 angle_deg
             self.surface_distance = abs(target_line.start_point.x)
             self.surface_angle_deg = target_line.angle_deg
@@ -1137,6 +1138,7 @@ class system_control:
         self.find_mode = False
         self.running_state = 202
         rospy.loginfo(" |-| 寻找喷涂位姿完成！")
+        rospy.sleep(1)
 
 
     def find_central_pos(self):
@@ -1451,7 +1453,7 @@ class system_control:
                         for i, point in enumerate(arm_paint_column_list[1:], start=1):
                             if self.emergency_stop_flag:
                                 break
-                            if i % 2 == 0:  # 偶数索引（即第 2, 4, 6... 个点）
+                            if i % 2 == 1:  # 偶数索引（即第 2, 4, 6... 个点）
                                 vel_use = vel_slow
                             else:            # 奇数索引（第 1, 3, 5... 个点）
                                 vel_use = vel_fast
@@ -1606,8 +1608,12 @@ class system_control:
                                 self.car_state = [2, 2]
                                 rospy.logwarn("等待机械臂回位")
                                 self.duco_cobot.movel(self.column_start_arm_pos, self.vel, self.acc, 0, '', '', '', True)
-                                self.lift_state = [2, self.compute_lift_moving_distance(self.column_start_lift_height - self.lift_height)]
-                                self.lift_state = [8, self.compute_lift_moving_distance(self.column_start_lift_height - self.lift_height)]
+                                back_to_start_dist = self.compute_lift_moving_distance(self.column_start_lift_height - self.lift_height)
+                                rospy.loginfo(f"lift back_to_start_dist:{back_to_start_dist}")
+                                self.lift_state = [2, back_to_start_dist]
+                                rospy.sleep(2)
+                                self.lift_state = [8, back_to_start_dist]
+                                rospy.sleep(3)
                                 now_time = time.time()
                                 while not self.lift_stop_flag:
                                     rospy.logwarn("等待升降机构回位")

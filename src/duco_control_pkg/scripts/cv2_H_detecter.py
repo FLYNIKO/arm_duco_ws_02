@@ -1038,8 +1038,8 @@ class StableRadarLineDetector:
                 self.publish_debug_line_info(stable_h_beams)
 
             else:
-                if self.debug_mode:
-                    print("No lines detected")
+                # if self.debug_mode:
+                #   print("No lines detected")
                 self.publish_scan_points(scan_msg)
             
         except Exception as e:
