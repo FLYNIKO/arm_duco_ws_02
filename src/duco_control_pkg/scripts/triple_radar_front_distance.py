@@ -159,11 +159,13 @@ class TripleRadarFrontDistance:
         # 检查雷达名称
         if radar not in self.radars:
             rospy.logwarn(f"未知雷达: {radar}")
+            rospy.sleep(1)
             return -1
             
         # 检查方向名称
         if direction not in self.angles:
             rospy.logwarn(f"未知方向: {direction}")
+            rospy.sleep(1)
             return -1
             
         radar_info = self.radars[radar]
@@ -171,6 +173,7 @@ class TripleRadarFrontDistance:
         # 检查数据是否超时
         if time.time() - radar_info['last_scan_time'] > self.scan_timeout:
             rospy.logwarn(f"雷达 {radar} 数据超时，最后更新时间: {radar_info['last_scan_time']}")
+            rospy.sleep(1)
             return -1
             
         return radar_info['distances'][direction]

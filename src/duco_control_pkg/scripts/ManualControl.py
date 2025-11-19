@@ -1405,7 +1405,8 @@ class system_control:
                             paint_column_num -= 1
                         # 停车停喷
                         self.car_state = [2, 2]
-                        rospy.loginfo("方柱喷涂：喷涂方柱完成")
+                        rospy.loginfo("方柱喷涂：本轮完成")
+                        rospy.loginfo(f"方柱喷涂：剩余喷涂次数：{paint_column_num}")
                         tcp_pos = self.duco_cobot.get_tcp_pose()
                         # 刷新上一次喷涂高度
                         if abs(self.get_distance("left", "down") - self.lift_height - tcp_pos[2]) < 10:
@@ -1417,13 +1418,14 @@ class system_control:
                         rospy.loginfo(f"上次末端高度：{last_paint_height}, 上次升降机高度{last_lift_height}")
                         # 刷新喷涂次数
                         paint_round_num += 1
-                        # 升降机下降
-                        self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
-                        rospy.sleep(2)
-                        rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
-
-
-
+                        if paint_column_num > 0 :
+                            # 升降机下降
+                            self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
+                            rospy.sleep(2)
+                            rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
+                        else:
+                            rospy.logwarn("方柱喷涂：喷涂方柱完成")
+                            break
 
                     else:
                         rospy.loginfo("方柱喷涂：开始计算喷涂路线")
@@ -1501,9 +1503,6 @@ class system_control:
         rospy.loginfo("down!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         rospy.sleep(5)
         self.lift_state = [2, -80]
-
-
-
 
     def pos_move(self, aim_pos):
         if self.position_flag and aim_pos is not None:
@@ -1604,7 +1603,7 @@ class system_control:
                         if self.paint_object == 0:
                             self.clog_function()
                         elif self.paint_object == 1:
-                            if self.column_start_arm_pos is not None and self.column_start_lift_height != 0 :
+                            if self.column_start_arm_pos is not None and self.column_start_lift_height > 0 :
                                 self.car_state = [2, 2]
                                 rospy.logwarn("等待机械臂回位")
                                 self.duco_cobot.movel(self.column_start_arm_pos, self.vel, self.acc, 0, '', '', '', True)
