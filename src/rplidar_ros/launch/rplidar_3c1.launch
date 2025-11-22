@@ -13,7 +13,7 @@
   </group>
 
   <group ns="left_radar">
-    <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen" launch-prefix="bash -c 'sleep 10; $0 $@' --">
+    <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen">
       <param name="serial_port"         type="string"   value="/dev/rplidar_L"/>
       <param name="serial_baudrate"     type="int"      value="460800"/>
       <param name="frame_id"            type="string"   value="left_radar"/>
@@ -25,7 +25,7 @@
   </group>
 
   <group ns="right_radar">
-    <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen" launch-prefix="bash -c 'sleep 20; $0 $@' --">
+    <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen">
       <param name="serial_port"         type="string"   value="/dev/rplidar_R"/>
       <param name="serial_baudrate"     type="int"      value="460800"/>
       <param name="frame_id"            type="string"   value="right_radar"/>

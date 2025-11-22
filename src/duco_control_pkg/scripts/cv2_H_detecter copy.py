@@ -7,7 +7,7 @@ import math
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
-from std_msgs.msg import ColorRGBA, Float64MultiArray, MultiArrayLayout, MultiArrayDimension
+from std_msgs.msg import ColorRGBA
 import matplotlib.pyplot as plt
 from collections import deque
 from config import *
@@ -70,8 +70,6 @@ class StableRadarLineDetector:
         self.scan_points_pub = rospy.Publisher('/radar_scan_Hs', Marker, queue_size=10)
         self.debug_pub = rospy.Publisher('/debug_Hs', MarkerArray, queue_size=10)
         self.line_info_pub = rospy.Publisher('/left_radar/H_detection_info', LineDetectionArray, queue_size=10)
-        # 发布过滤后的点坐标数组（x,y,x,y...格式）
-        self.filtered_points_pub = rospy.Publisher('/Duco_adjust', Float64MultiArray, queue_size=10)
 
         print("Stable Radar Line Detector initialized")
         print(f"Temporal buffer size: {self.temporal_buffer_size}")
@@ -122,10 +120,8 @@ class StableRadarLineDetector:
         # Create base occupancy image
         occupancy_img = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
 
-        # 只处理圆形范围内的点，同时收集过滤后的点坐标
+        # 只处理圆形范围内的点
         center = self.image_size // 2
-        filtered_x = []
-        filtered_y = []
         for i in range(len(img_x)):
             # 计算点到中心的距离（像素）
             dist_from_center = math.sqrt((img_x[i] - center)**2 + (img_y[i] - center)**2)
@@ -133,9 +129,6 @@ class StableRadarLineDetector:
             # 只保留在指定半径内的点
             if dist_from_center <= self.processing_radius_pixels:
                 occupancy_img[img_y[i], img_x[i]] = 255
-                # 收集过滤后的点的笛卡尔坐标
-                filtered_x.append(x[i])
-                filtered_y.append(y[i])
         # Multi-scale morphological operations for better line continuity
         # Small kernel for fine details
         kernel_small = np.ones((2, 2), np.uint8)
@@ -157,9 +150,7 @@ class StableRadarLineDetector:
         kernel_clean = np.ones((2, 2), np.uint8)
         occupancy_img = cv2.morphologyEx(occupancy_img, cv2.MORPH_OPEN, kernel_clean)
         
-        # 返回图像和过滤后的点坐标
-        filtered_points = (np.array(filtered_x), np.array(filtered_y))
-        return occupancy_img, (x, y), filtered_points
+        return occupancy_img, (x, y)
 
     def detect_lines_multi_scale(self, image):
         """Multi-scale line detection optimized for H-beam geometry"""
@@ -758,46 +749,6 @@ class StableRadarLineDetector:
         
         self.scan_points_pub.publish(marker)
 
-    def publish_filtered_points_array(self, filtered_x, filtered_y):
-        """发布过滤后的点坐标数组，格式为x,y,x,y..."""
-        # 确保是numpy数组并转换为列表
-        if isinstance(filtered_x, np.ndarray):
-            filtered_x = filtered_x.tolist()
-        if isinstance(filtered_y, np.ndarray):
-            filtered_y = filtered_y.tolist()
-        
-        if len(filtered_x) == 0 or len(filtered_y) == 0:
-            return
-        
-        # 确保长度相同
-        if len(filtered_x) != len(filtered_y):
-            rospy.logwarn(f"Filtered points array length mismatch: x={len(filtered_x)}, y={len(filtered_y)}")
-            min_len = min(len(filtered_x), len(filtered_y))
-            filtered_x = filtered_x[:min_len]
-            filtered_y = filtered_y[:min_len]
-        
-        # 创建Float64MultiArray消息
-        msg = Float64MultiArray()
-        
-        # 将x,y坐标交错排列成x,y,x,y...的格式
-        points_array = []
-        for i in range(len(filtered_x)):
-            points_array.append(float(filtered_x[i]))
-            points_array.append(float(filtered_y[i]))
-        
-        msg.data = points_array
-        
-        # 设置layout信息
-        msg.layout = MultiArrayLayout()
-        dim = MultiArrayDimension()
-        dim.label = "points"
-        dim.size = len(filtered_x)  # 点的数量
-        dim.stride = 2  # 每个点占2个元素（x,y）
-        msg.layout.dim = [dim]
-        msg.layout.data_offset = 0
-        
-        self.filtered_points_pub.publish(msg)
-
     def publish_h_beam_markers(self, h_beams, standalone_flanges):
         """Publish H-beam structures with enhanced visualization"""
         marker_array = MarkerArray()
@@ -982,11 +933,7 @@ class StableRadarLineDetector:
         """Enhanced main callback with stability processing"""
         try:
             # Create enhanced occupancy image
-            occupancy_img, scan_points, filtered_points = self.create_enhanced_occupancy_image(scan_msg)
-            
-            # 发布过滤后的点坐标数组
-            filtered_x, filtered_y = filtered_points
-            self.publish_filtered_points_array(filtered_x, filtered_y)
+            occupancy_img, scan_points = self.create_enhanced_occupancy_image(scan_msg)
             
             # Multi-scale line detection
             lines, edges = self.detect_lines_multi_scale(occupancy_img)

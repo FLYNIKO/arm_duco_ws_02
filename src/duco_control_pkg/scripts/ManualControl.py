@@ -1007,10 +1007,10 @@ class system_control:
         """
         根据方柱高度计算整数段数和每段长度（cm）
         优先选择段数少（段长尽量大）的方案
-        区间: [52, 118] cm
+        区间: [52, 92] cm
         """
         min_len = 0.52   # 每段最小长度 cm 对应角度25°
-        max_len = 1.18  # 每段最大长度 cm 对应角度45°
+        max_len = 0.92  # 每段最大长度 cm 对应角度40°
 
         best = None
         best_remainder = None
@@ -1122,11 +1122,11 @@ class system_control:
             else: 
                 self.column_rad = math.radians(self.column_deg)
 
-            self.arm_column_right_x = self.column_right_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
+            self.arm_column_right_x = self.column_right_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.75
             self.arm_column_right_y = self.column_right_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1] + 0.2
             self.arm_column_right_z = tcp_pos[2]
 
-            self.arm_column_left_x = self.column_left_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.55
+            self.arm_column_left_x = self.column_left_point.x + MAIN_RADAR_OFFSET[2] + tcp_pos[0] + 0.75
             self.arm_column_left_y = self.column_left_point.y + MAIN_RADAR_OFFSET[0] + tcp_pos[1] + 0.2
             self.arm_column_left_z = tcp_pos[2]
             rospy.loginfo(f"right:{self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z}")
@@ -1477,10 +1477,14 @@ class system_control:
                         rospy.loginfo(f"上次末端高度：{last_paint_height}, 上次升降机高度{last_lift_height}")
                         # 刷新喷涂次数
                         paint_round_num += 1
-                        # 升降机下降
-                        self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
-                        rospy.sleep(2)
-                        rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
+                        if paint_column_num > 0 :
+                            # 升降机下降
+                            self.lift_state = [8, self.compute_lift_moving_distance(lift_down_dist)]
+                            rospy.sleep(2)
+                            rospy.loginfo(f"方柱喷涂：升降机正在下降 {self.lift_state[1]} cm")
+                        else:
+                            rospy.logwarn("方柱喷涂：喷涂方柱完成")
+                            break
 
 
 
@@ -1726,7 +1730,7 @@ class system_control:
                 #记录自定义点位
                 elif key_input.record_diy_point:
                     self.record_diy_point()
-
+                    
                 #移动到自定义点位
                 elif key_input.diy_point:
                     self.move_diy_point()
