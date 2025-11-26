@@ -25,10 +25,10 @@ class SeparateRadarLineDetector:
         self.resolution = self.max_range / (self.image_size / 2)
         
         # 圆形处理范围参数
-        self.processing_radius_meters = 0.8  # 处理半径（米），只处理此范围内的数据
+        self.processing_radius_meters = 1  # 处理半径（米），只处理此范围内的数据
         self.processing_radius_pixels = int(self.processing_radius_meters / self.resolution)  # 转换为像素
         
-        # Enhanced Hough line detection parameters (保持原有准确的参数)
+        # Enhanced Hough line detection parameters 
         self.hough_threshold = 25
         self.min_line_length = 20
         self.max_line_gap = 50

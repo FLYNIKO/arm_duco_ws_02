@@ -69,6 +69,7 @@ class system_control:
         self.ob_vel = OB_VELOCITY # 障碍物避障速度
         self.ob_acc = OB_ACC # 障碍物避障加速度
         self.acc = DEFAULT_ACC # 机械臂末端加速度
+        self.column_paint_velocity = 0.1
         self.aj_pos = [] # 当前关节角度
         self.tcp_pos = [] # 当前末端位姿
         self.sysrun = True
@@ -103,6 +104,7 @@ class system_control:
         self.column_segment_info = {}
         self.column_segment_num = 0
         self.column_segment_length = 0
+        self.column_paint_width = 0.5
 
         self.scan_range = 0.7
         self.step_size = 0.02
@@ -768,6 +770,8 @@ class system_control:
             self.paint_object = self.latest_keys[11]
             self.lift_stop_flag = self.latest_keys[12]
             self.lift_height = self.latest_keys[13] / 100 + 1.665 # CM -> M 地面到机械臂底座高度 1.3m
+            self.column_paint_width = self.latest_keys[15] / 100
+            self.column_paint_velocity = self.latest_keys[16] / 100
 
         # 按位解析
         return KeyInputStruct(
@@ -1014,7 +1018,7 @@ class system_control:
         区间: [52, 92] cm
         """
         min_len = 0.30   # 每段最小长度 cm 对应角度15°
-        max_len = 0.52  # 每段最大长度 cm 对应角度25°
+        max_len = max(min(self.column_paint_width, 0.90), 0.50)  # 每段最大长度 cm 对应角度25°
 
         best = None
         best_remainder = None
@@ -1061,6 +1065,7 @@ class system_control:
         spray_distance: 喷嘴到目标距离 (cm)，默认 55
         返回喷嘴旋转角度 (°)
         """
+        # TODO: 重叠率修改
         theta_rad = math.atan((column_segment_length / 2) / spray_distance)
         theta_deg = math.degrees(theta_rad)
         return round(theta_deg, 2)
@@ -1070,7 +1075,7 @@ class system_control:
         防止升降机构碰到上下限位
         使用绝对高度进行计算
         上限位高度：3.15m
-        下限位高度：1.35m
+        下限位高度：1.665m
         """
         lift_up_limit = 3.15
         lift_down_limit = 1.665
@@ -1386,7 +1391,7 @@ class system_control:
                                 self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
-                        vel_slow = 0.1
+                        vel_slow = self.column_paint_velocity
                         vel_fast = 0.5
                         rospy.loginfo(f"方柱喷涂：喷涂点位列表: \n{arm_paint_column_list}\n")
                         # 起点为喷涂列表第一个点
@@ -1445,7 +1450,7 @@ class system_control:
                                 self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
-                        vel_slow = 0.1
+                        vel_slow = self.column_paint_velocity
                         vel_fast = 0.5
                         rospy.loginfo(f"方柱喷涂：喷涂点位列表: \n{arm_paint_column_list}\n")
                         # 起点为喷涂列表第一个点
