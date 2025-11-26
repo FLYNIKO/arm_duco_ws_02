@@ -12,6 +12,7 @@ from DucoCobot import DucoCobot
 from thrift import Thrift
 from ManualControl import system_control
 from std_msgs.msg import Float64MultiArray
+from key_input_pkg.msg import KeyInput
 from config import *
 
 class DemoApp:
@@ -23,8 +24,58 @@ class DemoApp:
         self.thread = threading.Thread(target=self.thread_fun)
         self.tcp_state = []  
         self.tcp_pub = rospy.Publisher('/Duco_state', Float64MultiArray, queue_size=20)
-        # self.adjust_pub = rospy.Publisher('/Duco_adjust', Float64MultiArray, queue_size=20) 
-        self.sys_ctrl = None 
+        self.adjust_pub = rospy.Publisher('/Duco_adjust', Float64MultiArray, queue_size=20) 
+        self.sys_ctrl = None
+        
+        # 用于存储key_input和点云数据
+        self.key_input_data = None
+        self.cv2_H_points_data = None
+        self.cv2_up_points_data = None
+        self.data_lock = threading.Lock()
+        
+        # 订阅话题
+        rospy.Subscriber('/key_input', KeyInput, self.key_input_callback)
+        rospy.Subscriber('/cv2_H_points', Float64MultiArray, self.cv2_H_points_callback)
+        rospy.Subscriber('/cv2_up_points', Float64MultiArray, self.cv2_up_points_callback) 
+
+    def key_input_callback(self, msg):
+        """处理/key_input话题的回调"""
+        with self.data_lock:
+            self.key_input_data = msg.keys
+            # 根据keys[11]的值转发对应的点云数据
+            self.forward_points_data()
+    
+    def cv2_H_points_callback(self, msg):
+        """处理/cv2_H_points话题的回调"""
+        with self.data_lock:
+            self.cv2_H_points_data = msg
+            # 如果当前选择的是cv2_H_points，则转发
+            if self.key_input_data is not None and len(self.key_input_data) > 11:
+                if self.key_input_data[11] == 0:
+                    self.adjust_pub.publish(msg)
+    
+    def cv2_up_points_callback(self, msg):
+        """处理/cv2_up_points话题的回调"""
+        with self.data_lock:
+            self.cv2_up_points_data = msg
+            # 如果当前选择的是cv2_up_points，则转发
+            if self.key_input_data is not None and len(self.key_input_data) > 11:
+                if self.key_input_data[11] == 1:
+                    self.adjust_pub.publish(msg)
+    
+    def forward_points_data(self):
+        """根据key_input[11]的值转发对应的点云数据"""
+        if self.key_input_data is None or len(self.key_input_data) <= 11:
+            return
+        
+        if self.key_input_data[11] == 0:
+            # 转发/cv2_H_points
+            if self.cv2_H_points_data is not None:
+                self.adjust_pub.publish(self.cv2_H_points_data)
+        elif self.key_input_data[11] == 1:
+            # 转发/cv2_up_points
+            if self.cv2_up_points_data is not None:
+                self.adjust_pub.publish(self.cv2_up_points_data)
 
     def robot_connect(self):
         rlt = self.duco_cobot.open()

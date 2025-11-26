@@ -243,6 +243,8 @@ class system_control:
         rospy.loginfo("cross===  safe pos done")
         # 初始化突变检测相关变量
         prev_distance = self.get_distance(direction, "up")
+        if prev_distance >= 2:
+            prev_distance = 2.0
         jump_count = 0
         # 开车停喷
         self.car_state = [8, 2] 
@@ -272,7 +274,7 @@ class system_control:
             if current_distance > 0:
                 prev_distance = current_distance
             # 等待0.1秒
-            rospy.sleep(0.1)
+            rospy.sleep(0.5)
         # 恢复点位
         rospy.loginfo("cross===  restore pos")
         self.duco_ob.movel([self.init_pos[0], origin_pos[1], origin_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
@@ -290,7 +292,6 @@ class system_control:
                 continue
             else:
                 ob_data = self.get_obstacle_status()
-                tcp_pos = self.duco_ob.get_tcp_pose()
                 if self.is_obstacle_detected():
                     
                     if self.ob_status == 0: # 全向避障
@@ -321,7 +322,6 @@ class system_control:
                         for key in obstacle_keys:
                             if ob_data.get(key):
                                 rospy.logwarn(f"| 检测到{key}障碍物，注意操作！ |")
-                        rospy.loginfo("--------------------------------")
                         rospy.sleep(1)
 
 
@@ -329,6 +329,7 @@ class system_control:
                         if self.paint_motion == 1 or self.paint_motion == 5 or self.paint_motion == 2 or self.paint_motion == 4 or self.paint_motion == 3 or self.paint_motion == 6:
 
                             if (ob_data['left_mid'] or ob_data['left_rear']) and self.car_direction == 0:
+                                pause_time = 0.4 / self.car_speed
                                 self.duco_ob.stop(True)
                                 self.ob_flag = True
                                 ob_data = self.get_obstacle_status()
@@ -339,9 +340,10 @@ class system_control:
                                 start_time = time.time()
                                 tcp_pos = self.duco_ob.get_tcp_pose()
                                 self.duco_ob.movel([tcp_pos[0], tcp_pos[1] - 0.1, tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
-                                
+                                rospy.sleep(0.1)
+                                ob_data = self.get_obstacle_status()
                                 if ob_data['left_mid'] and ob_data['left_rear'] and self.car_direction == 0:
-                                    self.ob_cross_check("right", 3.5)
+                                    self.ob_cross_check("right", pause_time)
 
                                 elif ob_data['left_mid'] and self.car_direction == 0:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
@@ -369,6 +371,7 @@ class system_control:
                                     self.running_state = 800
                         
                             if (ob_data['right_mid'] or ob_data['right_rear']) and self.car_direction == 1:
+                                pause_time = 0.5 / self.car_speed
                                 self.duco_ob.stop(True)
                                 self.ob_flag = True
                                 ob_data = self.get_obstacle_status()
@@ -379,9 +382,10 @@ class system_control:
                                 start_time = time.time()
                                 tcp_pos = self.duco_ob.get_tcp_pose()
                                 self.duco_ob.movel([tcp_pos[0], tcp_pos[1] + 0.1, tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
-                                
+                                rospy.sleep(0.1)
+                                ob_data = self.get_obstacle_status()
                                 if ob_data['right_mid'] and ob_data['right_rear'] and self.car_direction == 1:
-                                    self.ob_cross_check("left", 5)
+                                    self.ob_cross_check("left", pause_time)
 
                                 elif ob_data['right_mid'] and self.car_direction == 1:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
@@ -1009,8 +1013,8 @@ class system_control:
         优先选择段数少（段长尽量大）的方案
         区间: [52, 92] cm
         """
-        min_len = 0.52   # 每段最小长度 cm 对应角度25°
-        max_len = 0.92  # 每段最大长度 cm 对应角度40°
+        min_len = 0.30   # 每段最小长度 cm 对应角度15°
+        max_len = 0.52  # 每段最大长度 cm 对应角度25°
 
         best = None
         best_remainder = None
@@ -1398,14 +1402,14 @@ class system_control:
                                 break
                             if i % 2 == 1:  # 偶数索引（即第 2, 4, 6... 个点）
                                 vel_use = vel_slow
+                                paint_column_num -= 1
                             else:            # 奇数索引（第 1, 3, 5... 个点）
                                 vel_use = vel_fast
 
                             self.duco_cobot.movel(point, vel_use, 0.25, 0, '', '', '', True)
-                            paint_column_num -= 1
                         # 停车停喷
                         self.car_state = [2, 2]
-                        rospy.loginfo("方柱喷涂：本轮完成")
+                        rospy.loginfo("方柱喷涂：本轮喷涂完成")
                         rospy.loginfo(f"方柱喷涂：剩余喷涂次数：{paint_column_num}")
                         tcp_pos = self.duco_cobot.get_tcp_pose()
                         # 刷新上一次喷涂高度
@@ -1457,14 +1461,15 @@ class system_control:
                                 break
                             if i % 2 == 1:  # 偶数索引（即第 2, 4, 6... 个点）
                                 vel_use = vel_slow
+                                paint_column_num -= 1
                             else:            # 奇数索引（第 1, 3, 5... 个点）
                                 vel_use = vel_fast
 
                             self.duco_cobot.movel(point, vel_use, 0.25, 0, '', '', '', True)
-                            paint_column_num -= 1
                         # 停车停喷
                         self.car_state = [2, 2]
-                        rospy.loginfo("方柱喷涂：喷涂方柱完成")
+                        rospy.loginfo("方柱喷涂：本轮喷涂完成")
+                        rospy.loginfo(f"方柱喷涂：剩余喷涂次数：{paint_column_num}")
                         tcp_pos = self.duco_cobot.get_tcp_pose()
                         # 刷新上一次喷涂高度
                         if abs(self.get_distance("left", "down") - self.lift_height - tcp_pos[2]) < 10:
@@ -1485,8 +1490,6 @@ class system_control:
                         else:
                             rospy.logwarn("方柱喷涂：喷涂方柱完成")
                             break
-
-
 
         self.running_state = 401
         rospy.loginfo("-----退出自动模式-----")
@@ -1625,6 +1628,7 @@ class system_control:
                                         rospy.logwarn("等待升降机构回位超时")
                                         return
                                     continue
+                                rospy.loginfo("已回到上次开始的位置")
                             else:
                                 rospy.logwarn("没有点位，无法恢复")
                                 return
