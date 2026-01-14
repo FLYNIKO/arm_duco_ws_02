@@ -7,7 +7,7 @@ import math
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
-from std_msgs.msg import ColorRGBA
+from std_msgs.msg import ColorRGBA, Float64MultiArray, MultiArrayLayout, MultiArrayDimension
 import matplotlib.pyplot as plt
 from collections import deque
 from config import *
@@ -18,7 +18,7 @@ from duco_control_pkg.msg import LineInfo, LineDetectionArray
 class SeparateRadarLineDetector:
     def __init__(self):
         rospy.init_node('main_radar_line_detector')
-        self.debug_mode = True
+        self.debug_mode = DEBUG_MODE
         # Parameters for image conversion
         self.image_size = 800  # 适中的图像尺寸
         self.max_range = 1.0      # 适中的范围
@@ -28,7 +28,7 @@ class SeparateRadarLineDetector:
         self.processing_radius_meters = 1  # 处理半径（米），只处理此范围内的数据
         self.processing_radius_pixels = int(self.processing_radius_meters / self.resolution)  # 转换为像素
         
-        # Enhanced Hough line detection parameters (保持原有准确的参数)
+        # Enhanced Hough line detection parameters 
         self.hough_threshold = 25
         self.min_line_length = 20
         self.max_line_gap = 50
@@ -81,6 +81,8 @@ class SeparateRadarLineDetector:
         self.debug_pub = rospy.Publisher('/main_radar/debug_lines', MarkerArray, queue_size=10)
         
         self.line_info_pub = rospy.Publisher('/main_radar/line_detection_info', LineDetectionArray, queue_size=10)
+        # 发布过滤后的点坐标数组（x,y,x,y...格式）
+        self.filtered_points_pub = rospy.Publisher('/cv2_up_points', Float64MultiArray, queue_size=10)
         
         # 打印初始化信息
         rospy.loginfo(f"Main Radar Line Detector initialized")
@@ -119,7 +121,7 @@ class SeparateRadarLineDetector:
     def create_enhanced_occupancy_image(self, scan_points):
         """从单个雷达的点云数据创建占用栅格图像"""
         if len(scan_points[0]) == 0:
-            return np.zeros((self.image_size, self.image_size), dtype=np.uint8), ([], [])
+            return np.zeros((self.image_size, self.image_size), dtype=np.uint8), ([], []), (np.array([]), np.array([]))
         
         x_coords = scan_points[0]
         y_coords = scan_points[1]
@@ -129,8 +131,10 @@ class SeparateRadarLineDetector:
         # 创建基础占用图像
         occupancy_img = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
         
-        # 只处理圆形范围内的点
+        # 只处理圆形范围内的点，同时收集过滤后的点坐标
         center = self.image_size // 2
+        filtered_x = []
+        filtered_y = []
         for i in range(len(img_x)):
             # 计算点到中心的距离（像素）
             dist_from_center = math.sqrt((img_x[i] - center)**2 + (img_y[i] - center)**2)
@@ -138,6 +142,9 @@ class SeparateRadarLineDetector:
             # 只保留在指定半径内的点
             if dist_from_center <= self.processing_radius_pixels:
                 occupancy_img[img_y[i], img_x[i]] = 255
+                # 收集过滤后的点的笛卡尔坐标
+                filtered_x.append(x_coords[i])
+                filtered_y.append(y_coords[i])
         
         # 多尺度形态学操作提高线条连续性
         # 小核处理细节
@@ -152,7 +159,9 @@ class SeparateRadarLineDetector:
         kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         occupancy_img = cv2.morphologyEx(occupancy_img, cv2.MORPH_CLOSE, kernel_large)
         
-        return occupancy_img, (x_coords, y_coords)
+        # 返回图像和过滤后的点坐标
+        filtered_points = (np.array(filtered_x), np.array(filtered_y))
+        return occupancy_img, (x_coords, y_coords), filtered_points
 
     def detect_lines_multi_scale(self, image):
         """Multi-scale line detection for better stability"""
@@ -465,6 +474,46 @@ class SeparateRadarLineDetector:
                 self.radar_config['line_id_counter'] += 1
                 stable_lines.append(new_line)
 
+    def publish_filtered_points_array(self, filtered_x, filtered_y):
+        """发布过滤后的点坐标数组，格式为x,y,x,y..."""
+        # 确保是numpy数组并转换为列表
+        if isinstance(filtered_x, np.ndarray):
+            filtered_x = filtered_x.tolist()
+        if isinstance(filtered_y, np.ndarray):
+            filtered_y = filtered_y.tolist()
+        
+        if len(filtered_x) == 0 or len(filtered_y) == 0:
+            return
+        
+        # 确保长度相同
+        if len(filtered_x) != len(filtered_y):
+            rospy.logwarn(f"Filtered points array length mismatch: x={len(filtered_x)}, y={len(filtered_y)}")
+            min_len = min(len(filtered_x), len(filtered_y))
+            filtered_x = filtered_x[:min_len]
+            filtered_y = filtered_y[:min_len]
+        
+        # 创建Float64MultiArray消息
+        msg = Float64MultiArray()
+        
+        # 将x,y坐标交错排列成x,y,x,y...的格式
+        points_array = []
+        for i in range(len(filtered_x)):
+            points_array.append(float(filtered_x[i]))
+            points_array.append(float(filtered_y[i]))
+        
+        msg.data = points_array
+        
+        # 设置layout信息
+        msg.layout = MultiArrayLayout()
+        dim = MultiArrayDimension()
+        dim.label = "points"
+        dim.size = len(filtered_x)  # 点的数量
+        dim.stride = 2  # 每个点占2个元素（x,y）
+        msg.layout.dim = [dim]
+        msg.layout.data_offset = 0
+        
+        self.filtered_points_pub.publish(msg)
+
     def publish_scan_points(self, scan_points):
         """发布雷达的扫描点"""
         marker = Marker()
@@ -644,7 +693,11 @@ class SeparateRadarLineDetector:
             scan_points = (x_coords, y_coords)
             
             # 创建占用栅格图像
-            occupancy_img, _ = self.create_enhanced_occupancy_image(scan_points)
+            occupancy_img, _, filtered_points = self.create_enhanced_occupancy_image(scan_points)
+            
+            # 发布过滤后的点坐标数组
+            filtered_x, filtered_y = filtered_points
+            self.publish_filtered_points_array(filtered_x, filtered_y)
             
             # 多尺度线检测
             lines, edges = self.detect_lines_multi_scale(occupancy_img)
@@ -722,8 +775,7 @@ class SeparateRadarLineDetector:
                 if len(self.radar_config['stable_lines']) > 0:
                     self.publish_debug_line_info(self.radar_config['stable_lines'])
                 
-                if self.debug_mode: 
-                    self.save_debug_images(occupancy_img, edges, merged_lines)
+                self.save_debug_images(occupancy_img, edges, merged_lines)
 
             else:
                 if self.debug_mode:

@@ -22,8 +22,6 @@ class DemoApp:
         self.duco_cobot = DucoCobot(IP, PORT)
         self.hearthread = threading.Thread(target=self.hearthread_fun)
         self.thread = threading.Thread(target=self.thread_fun)
-        self.robot_state_thread = threading.Thread(target=self.robot_state_reader_fun)
-        self.car_state_thread = threading.Thread(target=self.car_state_reader_fun)
         self.tcp_state = []  
         self.tcp_pub = rospy.Publisher('/Duco_state', Float64MultiArray, queue_size=20)
         self.adjust_pub = rospy.Publisher('/Duco_adjust', Float64MultiArray, queue_size=20) 
@@ -34,23 +32,6 @@ class DemoApp:
         self.cv2_H_points_data = None
         self.cv2_up_points_data = None
         self.data_lock = threading.Lock()
-        
-        # 用于存储机械臂状态（线程安全）
-        self.robot_state_lock = threading.Lock()
-        self.cached_tcp_pos = [0, 0, 0, 0, 0, 0]  # 默认值
-        self.cached_tcp_state = [0, 0, 0, 0]  # 默认值
-        
-        # 用于存储车辆状态（线程安全）
-        self.car_state_lock = threading.Lock()
-        self.cached_car_state = [0, 0]  # 默认值
-        self.cached_running_state = 0
-        self.cached_distances = [0, 0, 0, 0]
-        self.cached_spray_swinging = [0] * 10
-        self.cached_lift_ctrl = -1
-        self.cached_lift_height = 0
-        
-        # 共享的停止事件，供所有线程使用
-        self._stop_event = threading.Event()
         
         # 订阅话题
         rospy.Subscriber('/key_input', KeyInput, self.key_input_callback)
@@ -106,6 +87,7 @@ class DemoApp:
         self.duco_cobot.switch_mode(1)
 
     def hearthread_fun(self):
+        self._stop_event = threading.Event()
         self.duco_heartbeat = DucoCobot(self.ip, PORT)
         self.duco_heartbeat.open()
         while not self.stopheartthread:
@@ -113,80 +95,49 @@ class DemoApp:
             self._stop_event.wait(1)
         self.duco_heartbeat.close()
 
-    def robot_state_reader_fun(self):
-        """专门用于读取机械臂状态的线程，避免阻塞发布线程"""
-        self.duco_state_reader = DucoCobot(self.ip, PORT)
-        self.duco_state_reader.open()
-        
+    def thread_fun(self):
+        self.duco_thread = DucoCobot(self.ip, PORT)
+        self.duco_thread.open()
+
         while not self.stopheartthread:
             try:
                 # 尝试获取机械臂姿态
-                tcp_pos = self.duco_state_reader.get_tcp_pose()
+                tcp_pos = self.duco_thread.get_tcp_pose()
             except Exception as e:
-                # 若超时或通讯异常，保持旧值不变
-                tcp_pos = None
+                # 若超时或通讯异常，则使用默认值
+                tcp_pos = [0, 0, 0, 0, 0, 0]
+                # 可选：打印一次警告（不要每次都打印，避免刷屏）
                 # rospy.logwarn_throttle(5, f"get_tcp_pose failed: {e}")
 
             try:
-                tcp_state = self.duco_state_reader.get_robot_state()
+                tcp_state = self.duco_thread.get_robot_state()
             except Exception as e:
-                # 若超时或通讯异常，保持旧值不变
-                tcp_state = None
+                tcp_state = [0, 0, 0, 0]
                 # rospy.logwarn_throttle(5, f"get_robot_state failed: {e}")
-            
-            # 只有成功获取到新状态时才更新缓存
-            with self.robot_state_lock:
-                if tcp_pos is not None:
-                    self.cached_tcp_pos = tcp_pos
-                if tcp_state is not None:
-                    self.cached_tcp_state = tcp_state
-            
-            # 状态读取可以稍微慢一点，比如每0.1秒读取一次
-            self._stop_event.wait(0.1)
-        
-        self.duco_state_reader.close()
 
-    def car_state_reader_fun(self):
-        """专门用于读取车辆状态的线程，避免阻塞发布线程"""
-        while not self.stopheartthread:
-            # 等待 sys_ctrl 创建完成
+            # 从 system_control 获取车辆状态
             if self.sys_ctrl is not None:
                 try:
                     car_state, running_state, distances, spray_swinging, lift_ctrl, lift_height = self.sys_ctrl.get_car_state()
-                    # 成功获取到新状态时才更新缓存（复制列表避免引用问题）
-                    with self.car_state_lock:
-                        self.cached_car_state = list(car_state) if isinstance(car_state, (list, tuple)) else car_state
-                        self.cached_running_state = running_state
-                        self.cached_distances = list(distances) if isinstance(distances, (list, tuple)) else distances
-                        self.cached_spray_swinging = list(spray_swinging) if isinstance(spray_swinging, (list, tuple)) else spray_swinging
-                        self.cached_lift_ctrl = lift_ctrl
-                        self.cached_lift_height = lift_height
+                    # lift_ctrl, lift_height = self.sys_ctrl.get_lift_info()
                 except Exception as e:
-                    # 若获取失败，保持旧值不变
-                    pass
+                    car_state = [0, 0]
+                    running_state = 0
+                    distances = [0, 0, 0, 0]
+                    spray_swinging = [0] * 10
+                    lift_ctrl = -8
+                    lift_height = 0.5
                     # rospy.logwarn_throttle(5, f"get_car_state failed: {e}")
-            
-            # 车辆状态读取可以稍微慢一点，比如每0.1秒读取一次
-            self._stop_event.wait(0.1)
-
-    def thread_fun(self):
-        """发布线程，使用已缓存的状态，不阻塞"""
-        while not self.stopheartthread:
-            # 从缓存中读取机械臂状态（线程安全）
-            with self.robot_state_lock:
-                tcp_pos = self.cached_tcp_pos.copy()
-                tcp_state = self.cached_tcp_state.copy()
-            
+            else:
+                tcp_pos = [0, 0, 0, 0, 0, 0]
+                tcp_state = [0, 0, 0, 0]
+                distances = [0, 0, 0, 0]
+                running_state = 0
+                car_state = [0, 0]
+                spray_swinging = [0] * 10
+                lift_ctrl = -1
+                lift_height = 0
             self.tcp_state = tcp_state
-
-            # 从缓存中读取车辆状态（线程安全）
-            with self.car_state_lock:
-                car_state = self.cached_car_state.copy()
-                running_state = self.cached_running_state
-                distances = self.cached_distances.copy()
-                spray_swinging = self.cached_spray_swinging.copy()
-                lift_ctrl = self.cached_lift_ctrl
-                lift_height = self.cached_lift_height
 
             # 组装并发布 ROS 消息
             msg = Float64MultiArray()
@@ -203,14 +154,14 @@ class DemoApp:
 
             self.tcp_pub.publish(msg)
 
-            # 每0.05秒循环一次（不再被任何状态读取阻塞）
+            # 每0.05秒循环一次
             self._stop_event.wait(0.05)
+
+        self.duco_thread.close()
 
     def run(self):
         self.robot_connect()
         self.hearthread.start()
-        self.robot_state_thread.start()  # 启动机械臂状态读取线程
-        self.car_state_thread.start()  # 启动车辆状态读取线程
         self.thread.start()
 
         try:
@@ -220,8 +171,6 @@ class DemoApp:
             self.stopheartthread = True
             time.sleep(1)
             self.hearthread.join()
-            self.robot_state_thread.join()  # 等待机械臂状态读取线程结束
-            self.car_state_thread.join()  # 等待车辆状态读取线程结束
             self.thread.join()
             rlt = self.duco_cobot.close()
             print("close:", rlt)
@@ -242,8 +191,6 @@ if __name__ == '__main__':
         app.stopheartthread = True
         time.sleep(1)
         app.hearthread.join()
-        app.robot_state_thread.join()  # 等待机械臂状态读取线程结束
-        app.car_state_thread.join()  # 等待车辆状态读取线程结束
         app.thread.join()
         rlt = app.duco_cobot.close()
         print("close:", rlt)

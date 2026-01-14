@@ -46,6 +46,16 @@ class TripleRadarFrontDistance:
                     'up': -1,
                     'down': -1
                 }
+            },
+            'height': {
+                'topic': '/height_radar/scan',
+                'latest_scan': None,
+                'last_scan_time': 0,
+                'distances': {
+                    'front': -1,
+                    'up': -1,
+                    'down': -1
+                }
             }
         }
         
@@ -158,19 +168,19 @@ class TripleRadarFrontDistance:
         """
         # 检查雷达名称
         if radar not in self.radars:
-            rospy.logwarn(f"未知雷达: {radar}")
+            rospy.logwarn_throttle(5, f"未知雷达: {radar}")  # 使用throttle避免刷屏，移除阻塞
             return -1
             
         # 检查方向名称
         if direction not in self.angles:
-            rospy.logwarn(f"未知方向: {direction}")
+            rospy.logwarn_throttle(5, f"未知方向: {direction}")  # 使用throttle避免刷屏，移除阻塞
             return -1
             
         radar_info = self.radars[radar]
         
         # 检查数据是否超时
         if time.time() - radar_info['last_scan_time'] > self.scan_timeout:
-            rospy.logwarn(f"雷达 {radar} 数据超时，最后更新时间: {radar_info['last_scan_time']}")
+            rospy.logwarn_throttle(5, f"雷达 {radar} 数据超时，最后更新时间: {radar_info['last_scan_time']}")  # 使用throttle避免刷屏，移除阻塞
             return -1
             
         return radar_info['distances'][direction]
