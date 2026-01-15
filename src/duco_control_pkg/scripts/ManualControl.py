@@ -453,23 +453,30 @@ class system_control:
         lift_start_flag: 1-上升，0-下降
         lift_moving_distance: 上升或下降的距离，单位：m
         '''
+        lift_adj = 0
         if lift_start_flag == 1:
             self.lift_stop_flag = False
             if lift_moving_distance > 0:
+                lift_adj = 0.005
                 self.lift_ctrl = 8
             elif lift_moving_distance < 0:
+                lift_adj = 0.03
                 self.lift_ctrl = 2
             # 更新当前高度
             self.lift_height = self.height_laser.get_distance('front')
             start_height = self.lift_height
+            rospy.loginfo("\n开始升降\n|↑|  开始时高度: %s" , start_height)
             start_time = time.time()
             while not self.lift_stop_flag:
                 now_height = self.height_laser.get_distance('front')
                 self.lift_height = now_height
-                rospy.loginfo("height: %s" , now_height)
-                if abs(now_height - start_height) > abs(lift_moving_distance) or time.time() - start_time > 5:
+                if abs(now_height - start_height) > abs(lift_moving_distance) - lift_adj or time.time() - start_time > 5:
                     self.lift_ctrl = -1
                     self.lift_stop_flag = True
+                    end_height = self.height_laser.get_distance('front')
+                    rospy.loginfo("|↑|  结束时高度: %s" , end_height)
+                    rospy.loginfo("|↑|  目标升降高度: %s" , lift_moving_distance)
+                    rospy.loginfo("|↑|  实际升降高度: %s" , (end_height - start_height))
                     break
                 else:
                     time.sleep(0.05)
@@ -1123,8 +1130,8 @@ class system_control:
         上限位高度：3.15m
         下限位高度：1.665m
         """
-        lift_up_limit = 3.15
-        lift_down_limit = 1.665
+        lift_up_limit = 5
+        lift_down_limit = 1
         if lift_moving_distance > 0 :
             if self.lift_height + lift_moving_distance > lift_up_limit:
                 lift_moving_distance = lift_up_limit - self.lift_height - 0.02
@@ -1137,7 +1144,7 @@ class system_control:
             else:
                 lift_moving_distance = lift_moving_distance
 
-        return lift_moving_distance * 100 # m -> cm
+        return lift_moving_distance # m -> cm
 
     def find_painting_pos_column(self):
         self.running_state = 200
