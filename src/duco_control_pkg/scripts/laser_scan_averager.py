@@ -151,6 +151,29 @@ class LaserScanAverager:
             
         return filtered_ranges
 
+    def _aligned_field_arrays(self, key, scans, field_name):
+        """Return list of numpy arrays with aligned length for averaging."""
+        if not scans:
+            return []
+        
+        lengths = [len(getattr(scan, field_name)) for scan in scans]
+        if not lengths or min(lengths) == 0:
+            return []
+        
+        target_len = min(lengths)
+        if len(set(lengths)) != 1:
+            rospy.logwarn_throttle(30.0, f"[{key}] {field_name} length mismatch {lengths}, truncating to {target_len}")
+        
+        aligned = []
+        for scan in scans:
+            field_data = getattr(scan, field_name)
+            if not field_data:
+                # For empty intensity arrays, fall back to zeros so the mean still works
+                aligned.append(np.zeros(target_len))
+                continue
+            aligned.append(np.array(field_data[:target_len]))
+        return aligned
+
     def publish_filtered_scan(self, event):
         for key, radar in self.radar_topics.items():
             with self.buffer_locks[key]:
@@ -169,18 +192,30 @@ class LaserScanAverager:
                 # 对intensities也可以应用简单的滤波（如果存在）
                 if latest_scan.intensities:
                     # 对intensities使用简单的移动平均
-                    avg_intensities = np.mean([np.array(scan.intensities) for scan in buffer_copy], axis=0)
-                    filtered_intensities = avg_intensities.tolist()
+                    aligned_intensities = self._aligned_field_arrays(key, buffer_copy, "intensities")
+                    if aligned_intensities:
+                        avg_intensities = np.mean(aligned_intensities, axis=0)
+                        filtered_intensities = avg_intensities.tolist()
+                    else:
+                        filtered_intensities = [0.0] * len(filtered_ranges)
                 else:
                     filtered_intensities = []
                     
             else:
                 # 使用原来的滑动平均方法
-                avg_ranges = np.mean([np.array(scan.ranges) for scan in buffer_copy], axis=0)
+                aligned_ranges = self._aligned_field_arrays(key, buffer_copy, "ranges")
+                if not aligned_ranges:
+                    rospy.logwarn_throttle(30.0, f"[{key}] Skipping average due to empty ranges after alignment")
+                    continue
+                avg_ranges = np.mean(aligned_ranges, axis=0)
                 filtered_ranges = avg_ranges.tolist()
                 
-                avg_intensities = np.mean([np.array(scan.intensities) if scan.intensities else np.zeros(len(scan.ranges)) for scan in buffer_copy], axis=0)
-                filtered_intensities = avg_intensities.tolist()
+                aligned_intensities = self._aligned_field_arrays(key, buffer_copy, "intensities")
+                if aligned_intensities:
+                    avg_intensities = np.mean(aligned_intensities, axis=0)
+                    filtered_intensities = avg_intensities.tolist()
+                else:
+                    filtered_intensities = [0.0] * len(filtered_ranges)
 
             # 创建滤波后的扫描消息
             filtered_scan = LaserScan()
