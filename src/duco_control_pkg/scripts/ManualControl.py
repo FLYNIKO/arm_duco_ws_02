@@ -1175,7 +1175,7 @@ class system_control:
             return
 
         else:
-            self.column_height = self.get_distance("right", "down")
+            self.column_height = self.get_distance("right", "down") - 0.2
             # 方柱喷涂初始升降机构高度
             self.column_start_lift_height = self.lift_height
             tcp_pos = self.duco_cobot.get_tcp_pose()
@@ -1455,13 +1455,13 @@ class system_control:
                         arm_paint_column_list = []
                         for i in range(self.arm_segment_num):
                             if i % 2 == 1:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_right)
                                 arm_paint_column_list.append(self.arm_column_left)
                             else:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
                         vel_slow = self.column_paint_velocity
@@ -1516,13 +1516,13 @@ class system_control:
                         arm_paint_column_list = []
                         for i in range(self.arm_segment_num):
                             if i % 2 == 1:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_right)
                                 arm_paint_column_list.append(self.arm_column_left)
                             else:
-                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
-                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.column_rad]
+                                self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
+                                self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
                         vel_slow = self.column_paint_velocity
@@ -1586,15 +1586,34 @@ class system_control:
         right_down_pos =    [-1.3, -0.5, -0.2, -1.57, 0.0, 1.57]
         left_up_pos =       [-1.3, 0.5, 0.6, -1.57, 0.0, 1.57]
         left_down_pos =     [-1.3, 0.5, -0.2, -1.57, 0.0, 1.57]
+        start_time = time.time()
+        round_num = 0
+        print("开始测试机械臂移动,起始时间：%s" % start_time)
 
+        while not self.emergency_stop_flag:
+            key_input = self.get_key_input()
+            if key_input.multi:
+                print("结束测试机械臂移动,轮数：%s" % round_num)
+                print("总时间：%s" % (time.time() - start_time))
+                break
+            
+            self.duco_cobot.movel(right_up_pos, self.vel, self.acc, 0, '', '', '', True)
+            self.duco_cobot.movel(right_down_pos, self.vel, self.acc, 0, '', '', '', True)
+            self.duco_cobot.movel(left_down_pos, self.vel, self.acc, 0, '', '', '', True)
+            self.duco_cobot.movel(left_up_pos, self.vel, self.acc, 0, '', '', '', True)
+            print("第%s轮结束,结束时间：%s" % (round_num, time.time()))
+            round_num += 1
+            rospy.sleep(1)
 
-        self.set_lift_ctrl(1, 0.5)
+        '''
+        self.set_lift_ctrl(1, 0.5/100)
         rospy.loginfo("height: %s" , self.lift_height)
         rospy.loginfo("down!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         rospy.loginfo("height: %s" , self.lift_height)
         rospy.sleep(5)
         self.set_lift_ctrl(1, -0.5)
         rospy.loginfo("height: %s" , self.lift_height)
+        '''
 
     def pos_move(self, aim_pos):
         if self.position_flag and aim_pos is not None:

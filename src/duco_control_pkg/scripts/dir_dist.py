@@ -107,7 +107,7 @@ class DirectionalLaser:
             rospy.logwarn_throttle(5, f"激光雷达数据超时，最后更新时间: {self.last_scan_time}")  # 使用throttle避免刷屏，移除阻塞
             return -1
             
-        return self.distances[direction] + 0.575 + 0.29 # 履带车离地高度0.55m
+        return self.distances[direction] + 0.58 + 0.29 # 履带车离地高度0.55m
 
     def get_all_distances(self):
         """

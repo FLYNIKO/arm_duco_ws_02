@@ -38,7 +38,7 @@ def verify_crc8(data):
     return received_crc == calculated_crc
 
 class ESP32Controller:
-    def __init__(self, ip='192.168.100.159', port=8080):
+    def __init__(self, ip='192.168.0.17', port=8080):
         self.ip = ip
         self.port = port
         self.sock = None
@@ -198,68 +198,82 @@ class ESP32Controller:
 
 
 # 使用示例
-
-def get_key_command():
-    """
-    捕捉键盘按钮动作，返回用户输入的命令字符
-
-    按键说明：
-    1-4: 切换对应 GPIO 通道开/关
-    e: 急停
-    s: 查询 GPIO 状态
-    q: 退出程序
-    """
-    cmd = input("\n请输入命令(1-4:切换GPIO, e:急停, s:查询状态, q:退出): ").strip().lower()
-    return cmd
-
-
 if __name__ == "__main__":
     # 连接ESP32
-    esp32 = ESP32Controller("192.168.0.210", 45678)
+    esp32 = ESP32Controller("192.168.100.159", 45678)
     
     try:
         esp32.connect()
+        
+        # 示例1: 控制GPIO
+        print("\n" + "="*50)
+        print("示例1: 控制GPIO")
+        print("="*50)
+        esp32.control_gpio([1, 0, 0, 0])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([0, 1, 0, 0])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([0, 0, 1, 0])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([0, 0, 0, 1])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([0, 0, 0, 0])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([1, 1, 1, 1])  # GPIO: 高,低,高,低
+        time.sleep(2)
+        esp32.control_gpio([0, 0, 0, 0])  # GPIO: 高,低,高,低
+        # 示例2: 控制电机0运行1000步
+        '''
+        print("\n" + "="*50)
+        print("示例2: 控制电机0")
+        print("="*50)
+        esp32.control_motor(
+            motor_id=0,
+            direction=0,         # 正转
+            pulse_width=100,       # 5微秒
+            pulse_interval=100,  # 500微秒
+            steps=6400          # 1000步
+        )
+        '''
+        # 等待一段时间
+        time.sleep(2)
 
-        # 当前4路GPIO状态（0=低，1=高），初始都为低
-        gpio_states = [0, 0, 0, 0]
-        print("\n" + "=" * 50)
-        print("键盘控制模式：")
-        print("1-4: 切换对应 GPIO 通道开/关")
-        print("e : 急停")
-        print("s : 查询 GPIO 状态")
-        print("q : 退出程序")
-        print("=" * 50)
-
-        while True:
-            cmd = get_key_command()
-
-            # 退出
-            if cmd == "q":
-                print("退出程序。")
-                break
-
-            # 急停
-            elif cmd == "e":
-                esp32.emergency_stop()
-                gpio_states = [0, 0, 0, 0]
-
-            # 查询 GPIO 开关状态
-            elif cmd == "s":
-                states = esp32.switch_status()
-                if states is not None:
-                    print(f"当前 GPIO 状态: {states}")
-
-            # 切换某一路 GPIO
-            elif cmd in ["1", "2", "3", "4"]:
-                index = int(cmd) - 1
-                # 本地状态取反
-                gpio_states[index] = 0 if gpio_states[index] == 1 else 1
-                print(f"切换 GPIO{index} 为: {gpio_states[index]}")
-                esp32.control_gpio(gpio_states)
-
-            else:
-                print("无效命令，请重新输入。")
-
+        
+        # 示例3: 查询电机0状态
+        '''
+        print("\n" + "="*50)
+        print("示例3: 查询电机状态")
+        print("="*50)
+        esp32.query_motor(0)
+        '''
+        # # 示例4: 同时控制多个电机
+        # print("\n" + "="*50)
+        # print("示例4: 同时控制多个电机")
+        # print("="*50)
+        # esp32.control_motor(0, 0, 5, 500, 2000)   # 电机0
+        # esp32.control_motor(1, 1, 10, 300, 1500)  # 电机1
+        # esp32.control_motor(2, 0, 8, 400, 1000)   # 电机2
+        
+        time.sleep(1)
+        '''
+        # 示例5: 查询所有电机状态
+        print("\n" + "="*50)
+        print("示例5: 查询所有电机")
+        print("="*50)
+        esp32.query_all_motors()
+        
+        # 示例6: 停止单个电机
+        print("\n" + "="*50)
+        print("示例6: 停止电机1")
+        print("="*50)
+        esp32.stop_motor(0)
+        '''
+        # 示例7: 急停（可选，谨慎使用）
+        # print("\n" + "="*50)
+        # print("示例7: 急停所有设备")
+        # print("="*50)
+        # esp32.emergency_stop()
+        
     except Exception as e:
         print(f"错误: {e}")
         import traceback
