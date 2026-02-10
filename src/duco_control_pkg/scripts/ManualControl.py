@@ -1426,6 +1426,7 @@ class system_control:
 
             while self.autopaint_flag:
                 # 发送的数据是厘米，程序中计算用的是米，需要转换
+                key_input = self.get_key_input()
                 # self.lift_state = [2, self.compute_lift_moving_distance(lift_down_dist)]
                 self.set_lift_ctrl(0, self.compute_lift_moving_distance(lift_down_dist))
                 if paint_column_num == 0 :
@@ -1464,7 +1465,7 @@ class system_control:
                                 self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
-                        vel_slow = self.column_paint_velocity
+                        vel_slow = max(0.5, min(2.0, self.column_paint_velocity))
                         vel_fast = 0.5
                         rospy.loginfo(f"方柱喷涂：喷涂点位列表: \n{arm_paint_column_list}\n")
                         # 起点为喷涂列表第一个点
@@ -1525,7 +1526,7 @@ class system_control:
                                 self.arm_column_left = [self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z - (i * self.column_segment_length), self.init_pos[3], self.init_pos[4], self.init_pos[5]]
                                 arm_paint_column_list.append(self.arm_column_left)
                                 arm_paint_column_list.append(self.arm_column_right)
-                        vel_slow = self.column_paint_velocity
+                        vel_slow = max(0.05, min(0.3, self.column_paint_velocity))
                         vel_fast = 0.5
                         rospy.loginfo(f"方柱喷涂：喷涂点位列表: \n{arm_paint_column_list}\n")
                         # 起点为喷涂列表第一个点
