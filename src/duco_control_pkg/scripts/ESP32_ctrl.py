@@ -1,6 +1,21 @@
 import socket
+import signal
 import struct
+import sys
 import time
+import rospy
+from key_input_pkg.msg import KeyInput
+_has_rospy = True
+print("已导入 rospy")
+
+
+# /keyinput 话题的数组第一个元素缓存（按位：第8位=急停，第25~28位=1~4）
+_keyinput_value = [0]
+_keyinput_prev = [0]
+
+ip = '192.168.0.5'
+port = 45678
+recv_timeout = 5.0
 
 # CRC8查找表（与ESP32端一致）
 CRC8_TABLE = [
@@ -38,15 +53,23 @@ def verify_crc8(data):
     return received_crc == calculated_crc
 
 class ESP32Controller:
-    def __init__(self, ip='192.168.100.159', port=8080):
+    def __init__(self, ip=ip, port=port, recv_timeout=recv_timeout):
         self.ip = ip
         self.port = port
         self.sock = None
+        self.recv_timeout = recv_timeout  # 接收响应超时（秒），应对网络/ESP32 延迟
+        self.last_key_time = time.time()
+        if _has_rospy:  # 如果使用ROS，初始化ROS节点和订阅者
+            rospy.init_node("esp32_ctrl", anonymous=True)
+            rospy.Subscriber("/key_input", KeyInput, self._keyinput_cb, queue_size=1)
+            print("已订阅 /key_input 话题")
+            self.rate = rospy.Rate(20)  # 20Hz 轮询按键
     
     def connect(self):
         """连接ESP32"""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((self.ip, self.port))
+        self.sock.settimeout(self.recv_timeout)
         print(f"已连接到 {self.ip}:{self.port}")
     
     def disconnect(self):
@@ -64,16 +87,31 @@ class ESP32Controller:
         print(f"发送: {list(command)}")
     
     def receive_response(self, expected_len):
-        """接收并验证响应"""
-        response = self.sock.recv(expected_len)
-        print(f"接收: {list(response)}")
-        
-        if not verify_crc8(response):
+        """
+        接收并验证响应。因网络/ESP32 延迟，响应可能晚到或分多次到达，故循环收满 expected_len 字节。
+        超时由 self.recv_timeout 控制，超时或 CRC 失败时返回 None。
+        """
+        if not self.sock:
+            return None
+        buf = b''
+        try:
+            while len(buf) < expected_len:
+                need = expected_len - len(buf)
+                chunk = self.sock.recv(need)
+                if not chunk:
+                    print("接收: 连接已关闭，未收满数据")
+                    return None
+                buf += chunk
+            print(f"接收: {list(buf)}")
+        except socket.timeout:
+            print(f"接收: 超时（{self.recv_timeout}s），仅收到 {len(buf)}/{expected_len} 字节")
+            return None
+
+        if not verify_crc8(buf):
             print("警告：CRC校验失败！")
             return None
-        
         print("CRC校验通过")
-        return response[:-1]  # 返回去除CRC的数据
+        return buf[:-1]  # 返回去除CRC的数据
     
     def emergency_stop(self):
         """急停"""
@@ -196,27 +234,78 @@ class ESP32Controller:
         print(f"开关GPIO状态: {gpio_states}")
         return gpio_states
 
+    def query_all_gpio_status(self):
+        """查询所有GPIO状态"""
+        print("\n=== 查询所有GPIO状态 ===")
+        command = bytes([0x03, 0x05])
+        self.send_command(command)
+        response = self.receive_response(7)
+        if not response:
+            return None
 
-# 使用示例
+        if len(response) < 6 or response[0] != 0x03 or response[1] != 0x05:
+            print("返回数据格式错误")
+            return None
 
-def get_key_command():
-    """
-    捕捉键盘按钮动作，返回用户输入的命令字符
+        gpio_states = list(response[2:6])
+        print(f"所有GPIO状态: {gpio_states}")
+        return gpio_states
 
-    按键说明：
-    1-4: 切换对应 GPIO 通道开/关
-    e: 急停
-    s: 查询 GPIO 状态
-    q: 退出程序
-    """
-    cmd = input("\n请输入命令(1-4:切换GPIO, e:急停, s:查询状态, q:退出): ").strip().lower()
-    return cmd
+    def _keyinput_cb(self, msg):
+        """/keyinput 话题回调：取数组第一个元素"""
+        if len(msg.keys) > 0:
+            _keyinput_value[0] = msg.keys[0]
+        self.last_key_time = time.time()
+
+    def get_key_command(self):
+        """
+        从 rostopic /keyinput 数组第一个元素的指定位解析命令（上升沿触发）：
+        第 8 位 -> 急停(e)，第 25~28 位 -> 1~4
+        """
+        if not _has_rospy or time.time() - self.last_key_time > 2:
+            esp32.emergency_stop()
+            return cmd
+
+        current = _keyinput_value[0]
+        prev = _keyinput_prev[0]
+
+        # 上升沿：当前为 1、上一次为 0 才返回对应命令
+        if (current & (1 << 8)) and not (prev & (1 << 8)):
+            _keyinput_prev[0] = current
+            return "e"
+        if (current & (1 << 25)) and not (prev & (1 << 25)):
+            _keyinput_prev[0] = current
+            return "1"
+        if (current & (1 << 26)) and not (prev & (1 << 26)):
+            _keyinput_prev[0] = current
+            return "2"
+        if (current & (1 << 27)) and not (prev & (1 << 27)):
+            _keyinput_prev[0] = current
+            return "3"
+        if (current & (1 << 28)) and not (prev & (1 << 28)):
+            _keyinput_prev[0] = current
+            return "4"
+
+        _keyinput_prev[0] = current
+        return ""
+
+
+def _handle_sigint(signum, frame):
+    """确保 Ctrl+C 能退出（覆盖 rospy 对 SIGINT 的接管）"""
+    print("\n收到 Ctrl+C，正在退出...")
+    if _has_rospy:
+        try:
+            rospy.signal_shutdown("Ctrl+C")
+        except Exception:
+            pass
+    sys.exit(0)
 
 
 if __name__ == "__main__":
-    # 连接ESP32
-    esp32 = ESP32Controller("192.168.0.210", 45678)
-    
+    # 连接ESP32（内有 rospy.init_node，会接管 SIGINT，故在其后注册自己的处理）
+    esp32 = ESP32Controller(ip, port, recv_timeout)
+    signal.signal(signal.SIGINT, _handle_sigint)
+
     try:
         esp32.connect()
 
@@ -224,16 +313,21 @@ if __name__ == "__main__":
         gpio_states = [0, 0, 0, 0]
         print("\n" + "=" * 50)
         print("键盘控制模式：")
-        print("1-4: 切换对应 GPIO 通道开/关")
-        print("e : 急停")
+        print("1-4: 切换对应 GPIO 通道开/关 (来自 /keyinput 第25~28位)")
+        print("e : 急停 (来自 /keyinput 第8位)")
         print("s : 查询 GPIO 状态")
         print("q : 退出程序")
         print("=" * 50)
 
         while True:
-            cmd = get_key_command()
+            cmd = esp32.get_key_command()
 
-            # 退出
+            if cmd == "":
+                if _has_rospy:
+                    rospy.sleep(0.05)
+                continue
+
+            # 退出（无 ROS 时用键盘 q；有 ROS 时可用其他方式）
             if cmd == "q":
                 print("退出程序。")
                 break
@@ -245,7 +339,8 @@ if __name__ == "__main__":
 
             # 查询 GPIO 开关状态
             elif cmd == "s":
-                states = esp32.switch_status()
+                # states = esp32.switch_status()
+                states = esp32.query_all_gpio_status()
                 if states is not None:
                     print(f"当前 GPIO 状态: {states}")
 
@@ -258,36 +353,20 @@ if __name__ == "__main__":
                 esp32.control_gpio(gpio_states)
 
             else:
-                print("无效命令，请重新输入。")
+                if not _has_rospy:
+                    print("无效命令，请重新输入。")
 
+            if _has_rospy:
+                rospy.sleep(0.05)
+
+    except KeyboardInterrupt:
+        print("\n收到 Ctrl+C，正在退出...")
+        if _has_rospy:
+            rospy.signal_shutdown("Ctrl+C")
     except Exception as e:
         print(f"错误: {e}")
         import traceback
         traceback.print_exc()
-    
+
     finally:
         esp32.disconnect()
-
-
-# 简化的快速调用函数
-def quick_control(ip, motor_id, steps, speed=500):
-    """
-    快速控制函数
-    ip: ESP32的IP地址
-    motor_id: 电机编号
-    steps: 步数（正数正转，负数反转）
-    speed: 速度（脉冲间隔微秒，越小越快）
-    """
-    esp = ESP32Controller(ip)
-    try:
-        esp.connect()
-        direction = 1 if steps < 0 else 0
-        steps = abs(steps)
-        esp.control_motor(motor_id, direction, 5, speed, steps)
-    finally:
-        esp.disconnect()
-
-
-# 快速使用示例
-# quick_control("192.168.1.100", motor_id=0, steps=1000, speed=500)  # 电机0正转1000步
-# quick_control("192.168.1.100", motor_id=1, steps=-500, speed=300)  # 电机1反转500步

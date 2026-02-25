@@ -3,6 +3,8 @@
 // WiFi配置
 const char* ssid = "BEKJ";
 const char* password = "bekj123456";
+//const char* ssid = "blls_5G";
+//const char* password = "86806068";
 
 // GPIO输出引脚定义（继电器等）
 const int GPIO_PINS[] = {13, 12, 14, 27};  // 根据实际需要修改
@@ -30,11 +32,11 @@ struct StepperMotor {
 const int MOTOR_COUNT = 3;  // 电机数量
 StepperMotor motors[MOTOR_COUNT] = {
   // 电机0: STEP_PIN, DIR_PIN, ENABLE_PIN
-  {25, 26, 33, false, 5, 500, 0, false, 0},
+  // {25, 26, 33, false, 5, 500, 0, false, 0},
   // 电机1
-  {32, 35, 34, false, 5, 500, 0, false, 0},
+  // {32, 35, 34, false, 5, 500, 0, false, 0},
   // 电机2
-  {19, 18, 5, false, 5, 500, 0, false, 0}
+  // {19, 18, 5, false, 5, 500, 0, false, 0}
 };
 
 // TCP服务器配置
@@ -169,16 +171,20 @@ void connectWiFi() {
   Serial.println("正在连接WiFi...");
   Serial.print("SSID: ");
   Serial.println(ssid);
-  
+
+  // 重试时若 STA 仍在连接中，不能再次 set config。先断开并清除状态，避免 "sta is connecting, cannot set config"
+  WiFi.disconnect(true);
+  delay(300);
+
   WiFi.begin(ssid, password);
-  
+
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi连接成功!");
     Serial.print("IP地址: ");
@@ -501,6 +507,22 @@ void handleExtensionCommand(uint8_t* data, int len) {
         client.write(swStatus, 7);
         client.flush();
         Serial.println("已返回 GPIO 开关状态 (subCmd 0x04)");
+      }
+      break;
+
+      case 0x05:  // 查询所有GPIO状态
+        {
+          uint8_t allGPIOStatus[7];
+          allGPIOStatus[0] = 0x03;
+          allGPIOStatus[1] = 0x05;
+          for (int i = 0; i < PIN_COUNT; i++) {
+            allGPIOStatus[2 + i] = digitalRead(GPIO_PINS[i]) ? 0x01 : 0x00;
+          }
+        
+        allGPIOStatus[6] = calculateCRC8(allGPIOStatus, 6);
+        client.write(allGPIOStatus, 7);
+        client.flush();
+        Serial.println("已返回所有GPIO状态 (subCmd 0x05)");
       }
       break;
       
