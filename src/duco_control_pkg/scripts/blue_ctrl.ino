@@ -1,10 +1,8 @@
 #include <WiFi.h>
 
 // WiFi配置
-const char* ssid = "BEKJ";
-const char* password = "bekj123456";
-//const char* ssid = "blls_5G";
-//const char* password = "86806068";
+const char* ssid = "blls";
+const char* password = "86806068";
 
 // GPIO输出引脚定义（继电器等）
 const int GPIO_PINS[] = {13, 12, 14, 27};  // 根据实际需要修改
@@ -510,7 +508,7 @@ void handleExtensionCommand(uint8_t* data, int len) {
       }
       break;
 
-      case 0x05:  // 查询所有GPIO状态
+    case 0x05:  // 查询所有GPIO状态
         {
           uint8_t allGPIOStatus[7];
           allGPIOStatus[0] = 0x03;
