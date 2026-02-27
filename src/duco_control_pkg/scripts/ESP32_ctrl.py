@@ -14,7 +14,7 @@ _keyinput_prev = [0]
 _spray_state_value = [0]
 _spray_state_prev = [0]
 
-ip = '192.168.0.5'
+ip = '192.168.0.210'
 port = 45678
 recv_timeout = 5.0
 
@@ -61,10 +61,11 @@ class ESP32Controller:
         self.recv_timeout = recv_timeout  # 接收响应超时（秒），应对网络/ESP32 延迟
         self.last_key_time = time.time()
         self.last_spray_state_time = time.time()
+        self.connect_failed = False
+        self.connection_lost = False  # 标记连接是否被对端断开
         rospy.init_node("esp32_ctrl", anonymous=True)
         rospy.Subscriber("/key_input", KeyInput, self._keyinput_cb, queue_size=1)
         rospy.Subscriber('/Duco_state', Float64MultiArray, self._spray_state_cb, queue_size=1)
-        print("已订阅 /key_input 话题")
         self.rate = rospy.Rate(20)  # 20Hz 轮询按键
     
     def connect(self):
@@ -72,21 +73,61 @@ class ESP32Controller:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((self.ip, self.port))
         self.sock.settimeout(self.recv_timeout)
-        print(f"已连接到 {self.ip}:{self.port}")
+        rospy.loginfo(f"| ESP32 |：已连接到 {self.ip}:{self.port}")
+    
+    def connect_with_retry(self, gpio_states=None, retry_interval=5):
+        """
+        尝试连接ESP32；若失败则每隔 retry_interval 秒重试，直到连接成功或 ROS 关闭。
+        若传入 gpio_states，连接成功后发送初始 GPIO 状态。
+        返回 True 表示连接成功，False 表示在 ROS 已关闭的情况下退出重试。
+        """
+        while not rospy.is_shutdown():
+            try:
+                self.connect()
+                self.connect_failed = False
+                self.connection_lost = False
+                if gpio_states is not None:
+                    self.control_gpio(gpio_states)
+                return True
+            except (socket.error, OSError, ConnectionResetError, BrokenPipeError) as e:
+                self.connect_failed = True
+                rospy.logwarn(f"| ESP32 |：连接到 {self.ip}:{self.port} 失败：{e}，{retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+        rospy.loginfo("| ESP32 |：ROS 已关闭，停止连接重试。")
+        return False
     
     def disconnect(self):
         """断开连接"""
         if self.sock:
-            self.sock.close()
-            print("已断开连接")
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+            rospy.loginfo("| ESP32 |：已断开连接")
+
+    def _mark_connection_lost(self):
+        """标记连接已丢失，由主循环负责重连"""
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+        self.connection_lost = True
     
     def send_command(self, data):
         """发送带CRC校验的命令"""
+        if not self.sock:
+            raise ConnectionError("| ESP32 |：未连接，无法发送命令")
         # 计算CRC并添加到数据末尾
         crc = calculate_crc8(data)
         command = data + bytes([crc])
-        self.sock.send(command)
-        print(f"发送: {list(command)}")
+        try:
+            self.sock.send(command)
+            rospy.loginfo(f"| ESP32 |：发送: {list(command)}")
+        except (ConnectionResetError, BrokenPipeError) as e:
+            rospy.logwarn(f"| ESP32 |：发送失败 ({e})，连接已断开")
+            self._mark_connection_lost()
+            raise
     
     def receive_response(self, expected_len):
         """
@@ -101,27 +142,33 @@ class ESP32Controller:
                 need = expected_len - len(buf)
                 chunk = self.sock.recv(need)
                 if not chunk:
-                    print("接收: 连接已关闭，未收满数据")
+                    rospy.logwarn("| ESP32 |：接收: 连接已关闭，未收满数据，将尝试重新连接...")
+                    self._mark_connection_lost()
                     return None
                 buf += chunk
-            print(f"接收: {list(buf)}")
+            rospy.loginfo(f"| ESP32 |：接收: {list(buf)}")
         except socket.timeout:
-            print(f"接收: 超时（{self.recv_timeout}s），仅收到 {len(buf)}/{expected_len} 字节")
+            rospy.logwarn(f"| ESP32 |：接收: 超时（{self.recv_timeout}s），仅收到 {len(buf)}/{expected_len} 字节，将尝试重新连接...")
+            self._mark_connection_lost()
+            return None
+        except (ConnectionResetError, BrokenPipeError) as e:
+            rospy.logwarn(f"| ESP32 |：接收: 连接被对端重置 ({e})，将尝试重新连接...")
+            self._mark_connection_lost()
             return None
 
         if not verify_crc8(buf):
-            print("警告：CRC校验失败！")
+            rospy.logwarn("| ESP32 |：警告：CRC校验失败！")
             return None
-        print("CRC校验通过")
+        rospy.loginfo("| ESP32 |：CRC校验通过")
         return buf[:-1]  # 返回去除CRC的数据
     
     def emergency_stop(self):
         """急停"""
-        print("\n=== 发送急停命令 ===")
+        rospy.loginfo("| ESP32 |：发送急停命令")
         self.send_command(bytes([0x00]))
         response = self.receive_response(3)
         if response and response[1] == 0x01:
-            print("急停成功！")
+            rospy.loginfo("| ESP32 |：急停成功！")
         return response
     
     def control_gpio(self, pin_states):
@@ -130,13 +177,13 @@ class ESP32Controller:
         pin_states: [state0, state1, state2, state3]
         state: 0=低, 1=高, 0xFF=不变
         """
-        print(f"\n=== 控制GPIO: {pin_states} ===")
+        rospy.loginfo(f"| ESP32 |：控制GPIO: {pin_states}")
         command = bytes([0x01] + pin_states)
         self.send_command(command)
         time.sleep(0.5)
         response = self.receive_response(5)
         if response:
-            print(f"GPIO状态: {list(response)}")
+            rospy.loginfo(f"| ESP32 |：GPIO状态: {list(response)}")
         return response
     
     def control_motor(self, motor_id, direction, pulse_width, pulse_interval, steps=0):
@@ -148,11 +195,11 @@ class ESP32Controller:
         pulse_interval: 脉冲间隔（微秒）
         steps: 步数（0=持续运行）
         """
-        print(f"\n=== 控制电机{motor_id} ===")
-        print(f"方向: {'反转' if direction else '正转'}")
-        print(f"脉冲宽度: {pulse_width}μs")
-        print(f"脉冲间隔: {pulse_interval}μs")
-        print(f"步数: {steps if steps > 0 else '持续运行'}")
+        rospy.loginfo(f"| ESP32 |：控制电机{motor_id}")
+        rospy.loginfo(f"| ESP32 |：方向: {'反转' if direction else '正转'}")
+        rospy.loginfo(f"| ESP32 |：脉冲宽度: {pulse_width}μs")
+        rospy.loginfo(f"| ESP32 |：脉冲间隔: {pulse_interval}μs")
+        rospy.loginfo(f"| ESP32 |：步数: {steps if steps > 0 else '持续运行'}")
         
         command = bytes([
             0x02,
@@ -171,35 +218,35 @@ class ESP32Controller:
         time.sleep(0.5)
         response = self.receive_response(4)
         if response and response[2] == 0x01:
-            print(f"电机{motor_id}启动成功！")
+            rospy.loginfo(f"| ESP32 |：电机{motor_id}启动成功！")
         return response
     
     def stop_motor(self, motor_id):
         """停止指定电机"""
-        print(f"\n=== 停止电机{motor_id} ===")
+        rospy.loginfo(f"| ESP32 |：停止电机{motor_id}")
         command = bytes([0x03, 0x01, motor_id])
         self.send_command(command)
         response = self.receive_response(5)
         if response and response[3] == 0x01:
-            print(f"电机{motor_id}已停止")
+            rospy.loginfo(f"| ESP32 |：电机{motor_id}已停止")
         return response
     
     def query_motor(self, motor_id):
         """查询指定电机状态"""
-        print(f"\n=== 查询电机{motor_id}状态 ===")
+        rospy.loginfo(f"| ESP32 |：查询电机{motor_id}状态")
         command = bytes([0x03, 0x02, motor_id])
         self.send_command(command)
         response = self.receive_response(8)
         if response:
             running = response[3]
             steps_left = (response[4] << 16) | (response[5] << 8) | response[6]
-            print(f"运行状态: {'运行中' if running else '已停止'}")
-            print(f"剩余步数: {steps_left}")
+            rospy.loginfo(f"| ESP32 |：运行状态: {'运行中' if running else '已停止'}")
+            rospy.loginfo(f"| ESP32 |：剩余步数: {steps_left}")
         return response
     
     def query_all_motors(self):
         """查询所有电机状态"""
-        print("\n=== 查询所有电机状态 ===")
+        rospy.loginfo(f"| ESP32 |：查询所有电机状态")
         command = bytes([0x03, 0x03])
         self.send_command(command)
         # 响应长度 = 2字节头 + 电机数量 + 1字节CRC
@@ -208,7 +255,7 @@ class ESP32Controller:
             motor_count = len(response) - 2
             for i in range(motor_count):
                 status = response[2 + i]
-                print(f"电机{i}: {'运行中' if status else '已停止'}")
+                rospy.loginfo(f"| ESP32 |：电机{i}: {'运行中' if status else '已停止'}")
         return response
 
     def switch_status(self):
@@ -219,7 +266,7 @@ class ESP32Controller:
         [1] = 0x04  子命令（GPIO 查询）
         [2..5] = 4 路 GPIO 状态，0x00/0x01
         """
-        print("\n=== 查询开关GPIO状态 ===")
+        rospy.loginfo(f"| ESP32 |：查询开关GPIO状态")
         # 发送扩展命令 0x03, 子命令 0x04
         command = bytes([0x03, 0x04])
         self.send_command(command)
@@ -229,16 +276,16 @@ class ESP32Controller:
             return None
 
         if len(response) < 6 or response[0] != 0x03 or response[1] != 0x04:
-            print("返回数据格式错误")
+            rospy.logwarn("| ESP32 |：返回数据格式错误")
             return None
 
         gpio_states = list(response[2:6])
-        print(f"开关GPIO状态: {gpio_states}")
+        rospy.loginfo(f"| ESP32 |：开关GPIO状态: {gpio_states}")
         return gpio_states
 
     def query_all_gpio_status(self):
         """查询所有GPIO状态"""
-        print("\n=== 查询所有GPIO状态 ===")
+        rospy.loginfo(f"| ESP32 |：查询所有GPIO状态")
         command = bytes([0x03, 0x05])
         self.send_command(command)
         response = self.receive_response(7)
@@ -246,11 +293,11 @@ class ESP32Controller:
             return None
 
         if len(response) < 6 or response[0] != 0x03 or response[1] != 0x05:
-            print("返回数据格式错误")
+            rospy.logwarn("| ESP32 |：返回数据格式错误")
             return None
 
         gpio_states = list(response[2:6])
-        print(f"所有GPIO状态: {gpio_states}")
+        rospy.loginfo(f"| ESP32 |：所有GPIO状态: {gpio_states}")
         return gpio_states
 
     def _spray_state_cb(self, msg):
@@ -313,7 +360,7 @@ class ESP32Controller:
 
 def _handle_sigint(signum, frame):
     """确保 Ctrl+C 能退出（覆盖 rospy 对 SIGINT 的接管）"""
-    print("\n收到 Ctrl+C，正在退出...")
+    rospy.loginfo("| ESP32 |：收到 Ctrl+C，正在退出...")
     try:
         rospy.signal_shutdown("Ctrl+C")
     except Exception:
@@ -325,12 +372,22 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, _handle_sigint)
 
     try:
-        esp32.connect()
-
-        # 当前4路GPIO状态（0=低，1=高），初始都为低
         gpio_states = [0, 1, 0, 0]
+        # 启动时带重试的连接逻辑：连接失败则每 10 秒重试一次
+        connected = esp32.connect_with_retry(gpio_states=gpio_states, retry_interval=5)
+        if not connected:
+            # 若在重试过程中 ROS 被关闭，则直接结束主程序
+            sys.exit(0)
 
         while True:
+            # 检测连接断开并尝试重连
+            if esp32.connection_lost:
+                rospy.loginfo("| ESP32 |：连接已断开，正在尝试重新连接...")
+                connected = esp32.connect_with_retry(gpio_states=gpio_states, retry_interval=5)
+                if not connected:
+                    sys.exit(0)
+                continue
+
             cmd = esp32.get_key_command()
             spray_cmd = esp32.get_spray_command()
 
@@ -340,55 +397,72 @@ if __name__ == "__main__":
 
             # 退出（无 ROS 时用键盘 q；有 ROS 时可用其他方式）
             if cmd == "q":
-                print("退出程序。")
+                rospy.loginfo("| ESP32 |：退出程序。")
                 break
 
             # 急停
             elif cmd == "e":
-                esp32.emergency_stop()
-                gpio_states = [0, 1, 0, 0]
+                try:
+                    esp32.emergency_stop()
+                    gpio_states = [0, 1, 0, 0]
+                except (ConnectionResetError, BrokenPipeError):
+                    esp32.connection_lost = True
 
             # 查询 GPIO 开关状态
             elif cmd == "s":
-                # states = esp32.switch_status()
-                states = esp32.query_all_gpio_status()
-                if states is not None:
-                    print(f"当前 GPIO 状态: {states}")
+                try:
+                    # states = esp32.switch_status()
+                    states = esp32.query_all_gpio_status()
+                    if states is not None:
+                        rospy.loginfo(f"| ESP32 |：当前 GPIO 状态: {states}")
+                except (ConnectionResetError, BrokenPipeError):
+                    esp32.connection_lost = True
 
             # 切换某一路 GPIO
             elif cmd in ["1", "2", "3", "4"]:
                 index = int(cmd) - 1
                 # 本地状态取反
                 gpio_states[index] = 0 if gpio_states[index] == 1 else 1
-                print(f"切换 GPIO{index} 为: {gpio_states[index]}")
-                esp32.control_gpio(gpio_states)
+                rospy.loginfo(f"| ESP32 |：切换 GPIO{index} 为: {gpio_states[index]}")
+                try:
+                    esp32.control_gpio(gpio_states)
+                except (ConnectionResetError, BrokenPipeError):
+                    esp32.connection_lost = True
             
             elif spray_cmd == "autosprayON":
-                gpio_states = [0, 1, 0, 1]
-                esp32.control_gpio(gpio_states)
-                rospy.sleep(4)
-                gpio_states = [1, 1, 0, 1]
-                esp32.control_gpio(gpio_states)
+                rospy.loginfo("| ESP32 |：自动开喷")
+                try:
+                    gpio_states = [0, 1, 0, 1]
+                    esp32.control_gpio(gpio_states)
+                    rospy.sleep(4)
+                    gpio_states = [1, 1, 0, 1]
+                    esp32.control_gpio(gpio_states)
+                except (ConnectionResetError, BrokenPipeError):
+                    esp32.connection_lost = True
 
             elif spray_cmd == "autosprayOFF":
-                gpio_states = [0, 1, 0, 1]
-                esp32.control_gpio(gpio_states)
-                rospy.sleep(3)
-                gpio_states = [0, 1, 0, 0]
-                esp32.control_gpio(gpio_states)
+                rospy.loginfo("| ESP32 |：自动停喷")
+                try:
+                    gpio_states = [0, 1, 0, 1]
+                    esp32.control_gpio(gpio_states)
+                    rospy.sleep(3)
+                    gpio_states = [0, 1, 0, 0]
+                    esp32.control_gpio(gpio_states)
+                except (ConnectionResetError, BrokenPipeError):
+                    esp32.connection_lost = True
 
             else:
-                print("无效命令，请重新输入。")
+                rospy.logwarn("无效命令，请重新输入。")
 
             rospy.sleep(0.05)
 
     except KeyboardInterrupt:
-        print("\n收到 Ctrl+C，正在退出...")
+        rospy.loginfo("| ESP32 |：收到 Ctrl+C，正在退出...")
         rospy.signal_shutdown("Ctrl+C")
     except Exception as e:
-        print(f"错误: {e}")
+        rospy.logwarn(f"| ESP32 |：错误: {e}")
         import traceback
-        traceback.print_exc()
+        rospy.logwarn(f"| ESP32 |：错误: {traceback.format_exc()}")
 
     finally:
         esp32.disconnect()

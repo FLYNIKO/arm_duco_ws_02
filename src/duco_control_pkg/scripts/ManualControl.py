@@ -345,7 +345,8 @@ class system_control:
                         obstacle_keys = ['left_front', 'left_mid', 'left_rear', 'right_front', 'right_mid', 'right_rear', 'center', 'up', 'down']
                         for key in obstacle_keys:
                             if ob_data.get(key):
-                                rospy.logwarn(f"| 检测到{key}障碍物，注意操作！ |")
+                                # rospy.logwarn(f"| 检测到{key}障碍物，注意操作！ |")
+                                pass
                         rospy.sleep(1)
 
 
@@ -1243,7 +1244,6 @@ class system_control:
 
             rospy.loginfo(f"\n方柱喷涂\n喷涂总行数: {self.column_segment_num}\n每行高度: {self.column_segment_length}\n喷涂摆动角度: {self.spray_swinging[0]} ~ {self.spray_swinging[1]}\n 机械臂每次喷涂行数：{self.arm_segment_num}")
                     
-        self.position_flag = True
         self.find_mode = False
         self.running_state = 202
         rospy.loginfo(" |-| 寻找喷涂位姿完成！")
@@ -1454,7 +1454,8 @@ class system_control:
             self.car_state = [2, 2]
             # 升降机下降距离
             lift_down_dist = - abs(self.arm_segment_num * self.column_segment_length) # 升降机下降距离为负数
-            min_arm_z = -1
+            # 机械臂最低高度
+            min_arm_z = -0.8
             print("\ndown dist = %s\n", lift_down_dist)
 
             while self.autopaint_flag:
@@ -1499,7 +1500,7 @@ class system_control:
                                 else:
                                     arm_paint_column_list.append(self.arm_column_left)
                                     arm_paint_column_list.append(self.arm_column_right)
-                        vel_slow = max(0.5, min(2.0, self.column_paint_velocity))
+                        vel_slow = max(0.05, min(0.3, self.column_paint_velocity))
                         vel_fast = 0.5
                         rospy.loginfo(f"方柱喷涂：喷涂点位列表: \n{arm_paint_column_list}\n")
                         # 起点为喷涂列表第一个点
