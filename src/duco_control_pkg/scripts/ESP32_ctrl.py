@@ -389,7 +389,8 @@ if __name__ == "__main__":
                 continue
 
             cmd = esp32.get_key_command()
-            spray_cmd = esp32.get_spray_command()
+            # spray_cmd = esp32.get_spray_command()
+            spray_cmd = ""
 
             if cmd == "" and spray_cmd == "":
                 rospy.sleep(0.05)
