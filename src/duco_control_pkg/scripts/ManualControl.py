@@ -87,6 +87,7 @@ class system_control:
         self.diy_point_flag = False
         self.car_flag = False # 车辆标志，True-避障，False-正常
         self.car_state = [8, 8] # 第一个是车辆启动状态，2-停车，8-开车 | 第二个是喷涂机喷涂状态，2-停喷，8-开喷
+        self.esp32_spray_state = 0 # 喷涂机状态，0-停喷，1-开喷
         self.lift_state = [0, 0] # 升降机构状态，0-下降，1-上升 | 相对位置，上正下负
         self.lift_stop_flag = True
         self.running_state = 0
@@ -223,6 +224,7 @@ class system_control:
                 self.ob_flag = False
                 self.ob_status = 1
                 self.car_state = [8, 8] # 车辆开车，喷涂机开喷
+                self.esp32_spray_state = 0
                 self.lift_stop_flag = True
                 self.lift_ctrl = -1
                 self.emergency_stop_flag = True
@@ -256,6 +258,7 @@ class system_control:
         # 安全位
         self.duco_ob.movel([self.safe_pos[0], origin_pos[1], origin_pos[2], origin_pos[3], origin_pos[4], origin_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
         self.duco_ob.movel([self.safe_pos[0], origin_pos[1], origin_pos[2]-0.2, origin_pos[3], origin_pos[4], origin_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
+        self.esp32_spray_state = 0
         self.car_state = [2, 2] 
         self.duco_ob.movel(self.safe_pos, self.ob_vel, self.ob_acc, 0, '', '', '', True)
         rospy.loginfo("ob_cross  移动到安全位置")
@@ -283,6 +286,7 @@ class system_control:
                 rospy.loginfo("ob_cross  检测到第二次突变，退出循环")
                 rospy.loginfo(f"ob_cross  等待{delay}秒抬起")
                 rospy.sleep(delay)
+                self.esp32_spray_state = 0
                 self.car_state = [2, 2]  # 车辆停车，喷涂机停喷
                 self.running_state = 821
                 self.ob_sidemotive_flag = False
@@ -299,7 +303,9 @@ class system_control:
         self.duco_ob.movel([self.init_pos[0], origin_pos[1], origin_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
         rospy.loginfo("ob_cross  给开喷信号，延迟五秒")
         self.car_state = [2, 8]
-        rospy.sleep(5)
+        rospy.sleep(3)
+        self.esp32_spray_state = 1
+        rospy.sleep(2)
         self.ob_sidemotive_flag = False
         self.ob_flag = False
         self.running_state = 800
@@ -315,6 +321,7 @@ class system_control:
                 rospy.sleep(1)
                 continue
             else:
+                key_input = self.get_key_input()
                 ob_data = self.get_obstacle_status()
                 if self.is_obstacle_detected():
                     
@@ -351,6 +358,7 @@ class system_control:
 
 
                     elif self.ob_status == 2: # 自动sync 避障逻辑
+                        key_input = self.get_key_input()
                         if self.paint_motion == 1 or self.paint_motion == 5 or self.paint_motion == 2 or self.paint_motion == 4 or self.paint_motion == 3 or self.paint_motion == 6:
 
                             if (ob_data['left_mid'] or ob_data['left_rear']) and self.car_direction == 0:
@@ -360,6 +368,7 @@ class system_control:
                                 ob_data = self.get_obstacle_status()
                                 
                                 self.ob_sidemotive_flag = True
+                                self.esp32_spray_state = 1
                                 self.car_state = [2, 8] # 停车继续喷
                                 self.running_state = 820
                                 start_time = time.time()
@@ -373,6 +382,7 @@ class system_control:
                                 '''
                                 elif ob_data['left_mid'] and self.car_direction == 0:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
+                                    self.esp32_spray_state = 0
                                     self.car_state = [8, 2] # 停车停喷
                                     while self.ob_sidemotive_flag:
                                         ob_data = self.get_obstacle_status()
@@ -389,6 +399,7 @@ class system_control:
                                         self.duco_ob.speed_stop(False)
                                         if (not ob_data['center'] and not ob_data['left_front'] and ob_data['right_front']) or ((not ob_data['center'] and not ob_data['left_front'] and not ob_data['right_front']) and (time.time() - start_time) > 10):
                                             # rospy.sleep(0.2)
+                                            self.esp32_spray_state = 0
                                             self.car_state = [2, 2] # 车辆停车，喷涂机停喷
                                             self.running_state = 821
                                             self.ob_sidemotive_flag = False
@@ -404,6 +415,7 @@ class system_control:
                                 ob_data = self.get_obstacle_status()
                                 
                                 self.ob_sidemotive_flag = True
+                                self.esp32_spray_state = 1
                                 self.car_state = [2, 8] # 停车停喷
                                 self.running_state = 820
                                 start_time = time.time()
@@ -417,6 +429,7 @@ class system_control:
                                 '''
                                 elif ob_data['right_mid'] and self.car_direction == 1:
                                     self.duco_ob.movel([tcp_pos[0] + 0.3, tcp_pos[1], tcp_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
+                                    self.esp32_spray_state = 0
                                     self.car_state = [8, 2] # 停车停喷
                                     while self.ob_sidemotive_flag:
                                         ob_data = self.get_obstacle_status()
@@ -433,6 +446,7 @@ class system_control:
                                         self.duco_ob.speed_stop(False)
                                         if (not ob_data['center'] and not ob_data['left_front'] and ob_data['right_front']) or ((not ob_data['center'] and not ob_data['left_front'] and not ob_data['right_front']) and (time.time() - start_time) > 10):
                                             # rospy.sleep(0.2)
+                                            self.esp32_spray_state = 0
                                             self.car_state = [2, 2] # 车辆停车，喷涂机停喷
                                             self.running_state = 821
                                             self.ob_sidemotive_flag = False
@@ -837,7 +851,7 @@ class system_control:
             ]
         self.lift_height = self.height_laser.get_distance('front')
 
-        return self.car_state, self.running_state, distances, self.spray_swinging, self.lift_ctrl, self.lift_height
+        return self.car_state, self.running_state, distances, self.spray_swinging, self.lift_ctrl, self.lift_height, self.esp32_spray_state
         
         # 读取/topic中的按键输入
     def _keys_callback(self, msg):
@@ -1385,6 +1399,7 @@ class system_control:
                         now_dist = self.get_directional_distance("right")
                     v2 = self.pid_dist_control(now_dist, target_dist, dt)
                     if not self.ob_flag and abs(target_dist - now_dist) < 0.1:
+                        self.esp32_spray_state = 1
                         self.car_state = [8, 8]
                         
                     rospy.loginfo(f"v2: {v2}\ntarget_dist: {target_dist}, \ndistance_now: {now_dist}")
@@ -1399,6 +1414,7 @@ class system_control:
                     else:
                         v2 = self.pid_dist_control(now_dist, target_dist, dt)
                     if not self.ob_flag and abs(target_dist - now_dist) < 0.1:
+                        self.esp32_spray_state = 1
                         self.car_state = [8, 8]
                         
                     rospy.loginfo(f"v2: {v2}\ntarget_dist: {target_dist}, \ndistance_now: {now_dist}")
@@ -1412,6 +1428,7 @@ class system_control:
                         now_dist = (self.get_directional_distance("right") + self.get_directional_distance("left")) / 2
                     v2 = self.pid_dist_control(now_dist, target_dist, dt)  
                     if not self.ob_flag and abs(target_dist - now_dist) < 0.1:
+                        self.esp32_spray_state = 1
                         self.car_state = [8, 8]
                         
                     rospy.loginfo(f"v2: {v2}\ntarget_dist: {target_dist}, \ndistance_now: {now_dist}")
@@ -1430,6 +1447,7 @@ class system_control:
                         now_dist = -1
                     v2 = self.pid_dist_control(now_dist, target_dist, dt)  
                     if not self.ob_flag and abs(target_dist - now_dist) < 0.1:
+                        self.esp32_spray_state = 1
                         self.car_state = [8, 8]
                         
                     rospy.loginfo(f"v2: {v2}\ntarget_dist: {target_dist}, \ndistance_now: {now_dist}")
@@ -1451,6 +1469,7 @@ class system_control:
             # 喷涂行数
             paint_column_num = self.column_segment_num
             # 停车停喷
+            self.esp32_spray_state = 0
             self.car_state = [2, 2]
             # 升降机下降距离
             lift_down_dist = - abs(self.arm_segment_num * self.column_segment_length) # 升降机下降距离为负数
@@ -1510,7 +1529,9 @@ class system_control:
                         # 车辆停车，喷涂机开喷
                         self.car_state = [2, 8]
                         rospy.logwarn("方柱喷涂：开始喷涂方柱，等待5秒")
-                        rospy.sleep(5)
+                        rospy.sleep(3)
+                        self.esp32_spray_state = 1
+                        rospy.sleep(2)
                         # 从第二个点开始循环
                         for i, point in enumerate(arm_paint_column_list[1:], start=1):
                             if self.emergency_stop_flag:
@@ -1523,6 +1544,7 @@ class system_control:
 
                             self.duco_cobot.movel(point, vel_use, 0.25, 0, '', '', '', True)
                         # 停车停喷
+                        self.esp32_spray_state = 0
                         self.car_state = [2, 2]
                         rospy.loginfo("方柱喷涂：本轮喷涂完成")
                         rospy.loginfo(f"方柱喷涂：剩余喷涂次数：{paint_column_num}")
@@ -1572,7 +1594,9 @@ class system_control:
                         # 车辆停车，喷涂机开喷
                         self.car_state = [2, 8]
                         rospy.logwarn("方柱喷涂：开始喷涂方柱，等待5秒")
-                        rospy.sleep(5)
+                        rospy.sleep(3)
+                        self.esp32_spray_state = 1
+                        rospy.sleep(2)
                         # 从第二个点开始循环
                         for i, point in enumerate(arm_paint_column_list[1:], start=1):
                             if self.emergency_stop_flag:
@@ -1585,6 +1609,7 @@ class system_control:
 
                             self.duco_cobot.movel(point, vel_use, 0.25, 0, '', '', '', True)
                         # 停车停喷
+                        self.esp32_spray_state = 0
                         self.car_state = [2, 2]
                         rospy.loginfo("方柱喷涂：本轮喷涂完成")
                         rospy.loginfo(f"方柱喷涂：剩余喷涂次数：{paint_column_num}")
@@ -1754,6 +1779,7 @@ class system_control:
                             self.clog_function()
                         elif self.paint_object == 1:
                             if self.column_start_arm_pos is not None and self.column_start_lift_height > 0 :
+                                self.esp32_spray_state = 0
                                 self.car_state = [2, 2]
                                 rospy.logwarn("等待机械臂回位")
                                 self.duco_cobot.movel(self.column_start_arm_pos, self.vel, self.acc, 0, '', '', '', True)

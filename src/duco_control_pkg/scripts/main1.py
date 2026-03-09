@@ -48,6 +48,7 @@ class DemoApp:
         self.cached_spray_swinging = [0] * 10
         self.cached_lift_ctrl = -1
         self.cached_lift_height = 0
+        self.cached_esp32_spray_state = 0
         
         # 共享的停止事件，供所有线程使用
         self._stop_event = threading.Event()
@@ -152,7 +153,7 @@ class DemoApp:
             # 等待 sys_ctrl 创建完成
             if self.sys_ctrl is not None:
                 try:
-                    car_state, running_state, distances, spray_swinging, lift_ctrl, lift_height = self.sys_ctrl.get_car_state()
+                    car_state, running_state, distances, spray_swinging, lift_ctrl, lift_height, esp32_spray_state = self.sys_ctrl.get_car_state()
                     # 成功获取到新状态时才更新缓存（复制列表避免引用问题）
                     with self.car_state_lock:
                         self.cached_car_state = list(car_state) if isinstance(car_state, (list, tuple)) else car_state
@@ -161,6 +162,7 @@ class DemoApp:
                         self.cached_spray_swinging = list(spray_swinging) if isinstance(spray_swinging, (list, tuple)) else spray_swinging
                         self.cached_lift_ctrl = lift_ctrl
                         self.cached_lift_height = lift_height
+                        self.cached_esp32_spray_state = esp32_spray_state
                 except Exception as e:
                     # 若获取失败，保持旧值不变
                     pass
@@ -187,7 +189,7 @@ class DemoApp:
                 spray_swinging = self.cached_spray_swinging.copy()
                 lift_ctrl = self.cached_lift_ctrl
                 lift_height = self.cached_lift_height
-
+                esp32_spray_state = self.cached_esp32_spray_state
             # 组装并发布 ROS 消息
             msg = Float64MultiArray()
             msg.data = (
@@ -199,6 +201,7 @@ class DemoApp:
                 + spray_swinging
                 + [lift_ctrl]
                 + [lift_height]
+                + [esp32_spray_state]
             )
 
             self.tcp_pub.publish(msg)

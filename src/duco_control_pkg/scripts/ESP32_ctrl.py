@@ -303,9 +303,9 @@ class ESP32Controller:
     def _spray_state_cb(self, msg):
         """/Duco_state 话题回调：取数组第一个元素"""
         if len(msg.data) > 0:
-            if msg.data[15] < 5:
+            if msg.data[29] == 0:
                 _spray_state_value[0] = 0
-            else:
+            elif msg.data[29] == 1:
                 _spray_state_value[0] = 1
         self.last_spray_state_time = time.time()
     
@@ -389,8 +389,8 @@ if __name__ == "__main__":
                 continue
 
             cmd = esp32.get_key_command()
-            # spray_cmd = esp32.get_spray_command()
-            spray_cmd = ""
+            spray_cmd = esp32.get_spray_command()
+            # spray_cmd = ""
 
             if cmd == "" and spray_cmd == "":
                 rospy.sleep(0.05)
@@ -433,22 +433,18 @@ if __name__ == "__main__":
             elif spray_cmd == "autosprayON":
                 rospy.loginfo("| ESP32 |：自动开喷")
                 try:
-                    gpio_states = [0, 1, 0, 1]
+                    gpio_states = [1, 1, 0, 0]
                     esp32.control_gpio(gpio_states)
-                    rospy.sleep(4)
-                    gpio_states = [1, 1, 0, 1]
-                    esp32.control_gpio(gpio_states)
+
                 except (ConnectionResetError, BrokenPipeError):
                     esp32.connection_lost = True
 
             elif spray_cmd == "autosprayOFF":
                 rospy.loginfo("| ESP32 |：自动停喷")
                 try:
-                    gpio_states = [0, 1, 0, 1]
-                    esp32.control_gpio(gpio_states)
-                    rospy.sleep(3)
                     gpio_states = [0, 1, 0, 0]
                     esp32.control_gpio(gpio_states)
+
                 except (ConnectionResetError, BrokenPipeError):
                     esp32.connection_lost = True
 
