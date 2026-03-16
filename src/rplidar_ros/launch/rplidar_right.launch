@@ -3,7 +3,7 @@
   <group ns="right_radar">
     <node name="rplidarNode"          pkg="rplidar_ros"  type="rplidarNode" output="screen">
       <param name="channel_type"        type="string" value="udp"/>  
-      <param name="udp_ip"              type="string" value="192.168.0.32"/>  
+      <param name="udp_ip"              type="string" value="192.168.0.8"/>  
       <param name="frame_id"            type="string" value="right_radar"/>
       <param name="inverted"            type="bool"   value="false"/>
       <param name="angle_compensate"    type="bool"   value="true"/>

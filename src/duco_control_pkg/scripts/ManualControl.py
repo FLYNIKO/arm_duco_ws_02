@@ -220,7 +220,7 @@ class system_control:
             key_input = self.get_key_input()
             state = self.duco_stop.get_robot_state()
             if key_input.multi or self.emergency_stop_flag:
-                rospy.logwarn("| 检测到紧急停止按键，正在执行紧急停止！ |")
+                rospy.logwarn_throttle(3.0, "与控制端连接丢失，执行急停，阈值使用默认值！")
                 self.running_state = 999
                 self.ob_flag = False
                 self.ob_status = 1
@@ -515,7 +515,7 @@ class system_control:
                     rospy.logwarn("|↑|  升降高度雷达数据错误，停止升降!")
                     return
 
-                if abs(now_height - start_height) > abs(lift_moving_distance) - lift_adj or (now_height < 1.43 and lift_moving_distance < 0):
+                if abs(now_height - start_height) > abs(lift_moving_distance) - lift_adj or (now_height < 1.444 and lift_moving_distance < 0):
                     self.lift_ctrl = -1
                     self.lift_stop_flag = True
                     end_height = self.height_laser.get_distance('front')
@@ -864,7 +864,7 @@ class system_control:
         if time.time() - self.last_key_time > KEYTIMEOUT:
             self.emergency_stop_flag = True
             key_bits = 0
-            rospy.logerr("与控制端连接丢失，执行急停，阈值使用默认值！")
+            rospy.logerr_throttle(5.0, "与控制端连接丢失，执行急停，阈值使用默认值！")
         else:
             key_bits = self.latest_keys[0]
             self.painting_deg_surface = abs(self.latest_keys[7])
@@ -1135,7 +1135,7 @@ class system_control:
         区间: [52, 92] cm
         """
         min_len = 0.4   # 每段最小长度 cm 对应角度15°
-        max_len = max(min(self.column_paint_width, 0.90), 0.52)  # 每段最大长度 cm 对应角度25°
+        max_len = max(min(self.column_paint_width, 0.88), 0.52)  # 每段最大长度 cm 对应角度25°
 
         best = None
         best_remainder = None
@@ -1258,7 +1258,7 @@ class system_control:
             rospy.loginfo(f"right:{self.arm_column_right_x, self.arm_column_right_y, self.arm_column_right_z}")
             rospy.loginfo(f"left:{self.arm_column_left_x, self.arm_column_left_y, self.arm_column_left_z}")
 
-            rospy.loginfo(f"\n方柱喷涂\n喷涂总行数: {self.column_segment_num}\n每行高度: {self.column_segment_length}\n喷涂摆动角度: {self.spray_swinging[0]} ~ {self.spray_swinging[1]}\n 重叠: {self.column_overlap}\n机械臂每次喷涂行数：{self.arm_segment_num}")
+            rospy.loginfo(f"\n方柱喷涂\n喷涂总行数: {self.column_segment_num}\n每行高度: {self.column_segment_length}\n喷涂摆动角度: {self.spray_swinging[0]} ~ {self.spray_swinging[1]}\n 重叠: {self.column_overlap * -200}cm\n机械臂每次喷涂行数：{self.arm_segment_num}")
                     
         self.find_mode = False
         self.running_state = 202
