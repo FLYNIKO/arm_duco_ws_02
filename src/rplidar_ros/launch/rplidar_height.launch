@@ -1,7 +1,8 @@
 <launch>
+
  <group ns="height_radar">
     <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen">
-      <param name="serial_port"         type="string"   value="/dev/rplidar_M"/> 
+      <param name="serial_port"         type="string"   value="/dev/rplidar_R"/> 
       <param name="serial_baudrate"     type="int"      value="460800"/>
       <param name="frame_id"            type="string"   value="height_radar"/>
       <param name="inverted"            type="bool"     value="false"/>
