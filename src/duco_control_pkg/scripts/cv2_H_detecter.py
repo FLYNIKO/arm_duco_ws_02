@@ -65,7 +65,7 @@ class StableRadarLineDetector:
         self.min_line_length_pixels_final = 25  # 最终过滤的最小像素长度
         
         # Subscriber and publishers
-        self.scan_sub = rospy.Subscriber('/left_radar/filtered_scan', LaserScan, self.scan_callback)
+        self.scan_sub = rospy.Subscriber('/right_radar/filtered_scan', LaserScan, self.scan_callback)
         self.marker_pub = rospy.Publisher('/detected_Hs', MarkerArray, queue_size=10)
         self.scan_points_pub = rospy.Publisher('/radar_scan_Hs', Marker, queue_size=10)
         self.debug_pub = rospy.Publisher('/debug_Hs', MarkerArray, queue_size=10)

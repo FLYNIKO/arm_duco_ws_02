@@ -204,10 +204,8 @@ class system_control:
         self.ob_flag = False # 障碍物检测标志
         self.ob_thread = threading.Thread(target=self.ob_thread, daemon=True)
         self.ob_thread.start()
-                
-        # 初始化方向性激光雷达读取器
+
         self.directional_laser = DirectionalLaser('/right_radar/filtered_scan')
-        # 初始化高度雷达读取器（使用dir_dist.py中的DirectionalLaser）
         self.height_laser = DirectionalLaserSimple('/height_radar/scan')
         
     # 急停线程
@@ -243,9 +241,7 @@ class system_control:
                     self.duco_stop.switch_mode(1)          
             self._stop_event.wait(0.05)
 
-    def ob_cross_check(self, direction, delay):
-        # 停车停喷
-        
+    def ob_cross_check(self, radar, direction, delay):
         self.duco_ob.stop(True)
         self.ob_flag = True
         ob_data = self.get_obstacle_status()
@@ -264,7 +260,7 @@ class system_control:
         self.duco_ob.movel(self.safe_pos, self.ob_vel, self.ob_acc, 0, '', '', '', True)
         rospy.loginfo("ob_cross  移动到安全位置")
         # 初始化突变检测相关变量
-        prev_distance = self.get_distance(direction, "up")
+        prev_distance = self.get_distance(radar, direction)
         if prev_distance >= 2:
             prev_distance = 2.0
         jump_count = 0
@@ -272,7 +268,7 @@ class system_control:
         self.car_state = [8, 2] 
         while self.ob_sidemotive_flag:
             # 获取当前距离
-            current_distance = self.get_distance(direction, "up")
+            current_distance = self.get_distance(radar, direction)
             if current_distance >= 2:
                 current_distance = 2.0
             
@@ -288,20 +284,17 @@ class system_control:
                 rospy.loginfo(f"ob_cross  等待{delay}秒抬起")
                 rospy.sleep(delay)
                 self.esp32_spray_state = 0
-                self.car_state = [2, 2]  # 车辆停车，喷涂机停喷
+                self.car_state = [2, 2] 
                 self.running_state = 821
                 self.ob_sidemotive_flag = False
                 self.ob_flag = False
                 break
             
-            # 更新上一次的距离（只在有效值时更新）
             if current_distance > 0:
                 prev_distance = current_distance
-            # 等待0.1秒
             rospy.sleep(0.5)
-        # 恢复点位
         rospy.loginfo("ob_cross  移动到恢复点位")
-        self.duco_ob.movel([self.init_pos[0], origin_pos[1], origin_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
+        self.duco_ob.movel([self.init_pos[0], self.init_pos[1], origin_pos[2], self.init_pos[3], self.init_pos[4], self.init_pos[5]], self.ob_vel, self.ob_acc, 0, '', '', '', True)
         rospy.loginfo("ob_cross  给开喷信号，延迟五秒")
         self.car_state = [2, 8]
         rospy.sleep(3)
@@ -378,7 +371,7 @@ class system_control:
                                 rospy.sleep(0.1)
                                 ob_data = self.get_obstacle_status()
                                 
-                                self.ob_cross_check("right", pause_time)
+                                self.ob_cross_check("right", "up", pause_time)
 
                                 '''
                                 elif ob_data['left_mid'] and self.car_direction == 0:
@@ -425,7 +418,7 @@ class system_control:
                                 rospy.sleep(0.1)
                                 ob_data = self.get_obstacle_status()
 
-                                self.ob_cross_check("left", pause_time)
+                                self.ob_cross_check("left", "down", pause_time)
 
                                 '''
                                 elif ob_data['right_mid'] and self.car_direction == 1:
@@ -560,7 +553,10 @@ class system_control:
                 self.H_processing_ready = False
                 self.H_detection_history.clear()
             else:
-                rospy.loginfo(f"正在收集H检测信息... ({len(self.H_detection_history)}/3)")
+                if self.paint_object == 0:
+                    rospy.loginfo(f"正在收集H检测信息... ({len(self.H_detection_history)}/3)")
+                else:
+                    pass
         else:
             # 如果收到的信息无效，清空历史记录
             self.H_detection_history.clear()
@@ -1267,73 +1263,10 @@ class system_control:
 
 
     def find_central_pos(self):
-        self.running_state = 200
-        self.position_flag = False
-        self.ob_status = 1
-        
-        self.H_find_flag = False
-        
-        tcp_pos = self.duco_cobot.get_tcp_pose()
-        
         if self.paint_object == 0:
-            #横_工字梁：第一步：扫描钢梁中心位置
-            start_z = tcp_pos[2]  # 当前 z 方向为上下
-
-            scan_data = []  # 保存 [z坐标, 距离值]
-
-            rospy.loginfo("从上到下开始扫描...")
-
-            steps = int(self.scan_range / self.step_size)
-            for i in range(steps):
-                # 向下移动一小步
-                if self.emergency_stop_flag:
-                    rospy.logwarn("检测到急停信号，停止寻找钢梁中心位置！")
-                    return
-                tcp_pos[2] = start_z - i * self.step_size
-                self.duco_cobot.movel(tcp_pos, self.vel, self.acc, 0, '', '', '', True)
-                rospy.sleep(0.05)
-
-                # 读取前向激光传感器
-                dist = self.get_directional_distance("right")
-                if dist > 0:
-                    scan_data.append((tcp_pos[2], dist))  # 记录当前高度和距离值
-                    rospy.loginfo(f"scan z={tcp_pos[2]:.3f}m, front={dist:.3f}m")
-
-            rospy.loginfo("扫描完成，开始检测突变边缘...")
-
-            edge_positions = []
-            for i in range(1, len(scan_data)):
-                if self.emergency_stop_flag:
-                    print("检测到急停信号，停止寻找钢梁中心位置！")
-                    return
-                prev = scan_data[i - 1][1]
-                curr = scan_data[i][1]
-                if abs(curr - prev) > self.min_jump_threshold:
-                    z_pos = scan_data[i][0]
-                    dist = scan_data[i][1]
-                    edge_positions.append((z_pos, dist))
-
-            if len(edge_positions) >= 2:
-                top_edge = edge_positions[0][0]
-                bottom_edge = edge_positions[-1][0]
-                center_z = (top_edge + bottom_edge) / 2
-
-                # 计算目标末端位置
-                center_pos = list(self.duco_cobot.get_tcp_pose())
-                center_pos[2] = center_z
-
-                # 移动到目标位置
-                self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
-                # 计算当前喷涂距离，并移动到目标喷涂距离
-                dist = self.get_directional_distance("right")
-                center_pos[0] -= dist - 0.35
-                self.duco_cobot.movel(center_pos, self.vel, self.acc, 0, '', '', '', True)
-                self.paint_center = center_pos
-
             self.find_central_pos_manual()
         
         elif self.paint_object == 1:
-
             self.find_painting_pos_column()
             
     def pid_dist_control(self, distance, target_dist, dt):
@@ -1362,13 +1295,6 @@ class system_control:
     def _column_paint_one_round(self, paint_column_num, paint_round_num,
                                 last_paint_height, last_lift_height,
                                 min_arm_z, lift_down_dist):
-        """
-        执行一轮立柱喷涂（构建点位列表、移动、开喷、收尾、触发升降机下降）。
-
-        返回:
-            (paint_column_num, paint_round_num, last_paint_height, last_lift_height, should_break)
-            should_break=True 表示喷涂已全部完成，外层循环应退出。
-        """
         arm_paint_column_list = []
         for i in range(self.arm_segment_num):
             self.arm_column_right = [self.arm_column_right_x, self.arm_column_right_y,
@@ -1402,10 +1328,12 @@ class system_control:
                 break
             if i % 2 == 1:  # 偶数索引（即第 2, 4, 6... 个点）
                 vel_use = vel_slow
+                acc_use = 0.25
                 paint_column_num -= 1
             else:            # 奇数索引（第 1, 3, 5... 个点）
                 vel_use = vel_fast
-            self.duco_cobot.movel(point, vel_use, 0.25, 0, '', '', '', True)
+                acc_use = 0.4
+            self.duco_cobot.movel(point, vel_use, acc_use, 0, '', '', '', True)
 
         self.esp32_spray_state = 0
         self.car_state = [2, 2]
@@ -1438,7 +1366,7 @@ class system_control:
 
 
         if self.paint_object == 0:
-            v2 = 0.0  # 初始化前后速度
+            v2 = 0.0  
             cur_time = time.time()
             last_time = cur_time
 
@@ -1539,9 +1467,7 @@ class system_control:
             paint_column_num = self.column_segment_num
             self.esp32_spray_state = 0
             self.car_state = [2, 2]
-            # 升降机下降距离
-            lift_down_dist = - abs(self.arm_segment_num * self.column_segment_length) # 升降机下降距离为负数
-            # 机械臂最低高度
+            lift_down_dist = - abs(self.arm_segment_num * self.column_segment_length)
             min_arm_z = -0.8
             print("\ndown dist = %s\n", lift_down_dist)
 
@@ -1560,7 +1486,6 @@ class system_control:
                     rospy.sleep(1)
                     continue
 
-                # 升降机实际下降量不足时，根据上次喷涂高度重新计算起始 z
                 if paint_round_num > 0 and abs(self.last_lift_moving_dist) < (abs(lift_down_dist) - 0.05):
                     rospy.logwarn("方柱喷涂：升降机构没有下降预期高度，调整机械臂姿态")
                     self.arm_column_left_z  = last_paint_height - self.column_segment_length - self.lift_height
@@ -1578,7 +1503,6 @@ class system_control:
         self.running_state = 401
         rospy.loginfo("-----退出自动模式-----")
 
-    # 自动喷涂，车辆不动机械臂动
     def auto_paint_interval(self):
         # TODO: 自动喷涂，车辆不动机械臂动
         pass
@@ -1607,25 +1531,12 @@ class system_control:
             round_num += 1
             rospy.sleep(1)
 
-        '''
-        self.set_lift_ctrl(1, 0.5/100)
-        rospy.loginfo("height: %s" , self.lift_height)
-        rospy.loginfo("down!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        rospy.loginfo("height: %s" , self.lift_height)
-        rospy.sleep(5)
-        self.set_lift_ctrl(1, -0.5)
-        rospy.loginfo("height: %s" , self.lift_height)
-        '''
-
     def pos_move(self, aim_pos):
         if self.position_flag and aim_pos is not None:
             tcp_pos = self.duco_cobot.get_tcp_pose()
             self.duco_cobot.movel([self.paint_center[0], tcp_pos[1], tcp_pos[2], tcp_pos[3], tcp_pos[4], tcp_pos[5]], self.vel, self.acc, 0, '', '', '', True)
             self.duco_cobot.movel([self.paint_center[0], tcp_pos[1], aim_pos[2], tcp_pos[3], tcp_pos[4], tcp_pos[5]], self.vel, self.acc, 0, '', '', '', True)
             self.duco_cobot.movel(aim_pos, self.vel, self.acc, 0, '', '', '', True)
-            # self.duco_cobot.servoj_pose([self.paint_center[0], tcp_pos[1], tcp_pos[2], tcp_pos[3], tcp_pos[4], tcp_pos[5]], self.vel, self.acc, '', '', '', True)
-            # self.duco_cobot.servoj_pose([self.paint_center[0], tcp_pos[1], aim_pos[2], tcp_pos[3], tcp_pos[4], tcp_pos[5]], self.vel, self.acc, '', '', '', True)
-            # self.duco_cobot.servoj_pose(aim_pos, self.vel, self.acc, '', '', '', True)
             if aim_pos == self.paint_top:
                 self.paint_motion = 1
                 self.running_state = 131
@@ -1673,7 +1584,6 @@ class system_control:
         rospy.loginfo("等待移动到初始位置...")
         
         self.paint_motion = 0
-        # self.duco_cobot.movej2(self.init_pos, 2*self.vel, self.acc, 0, True)
         self.duco_cobot.movel(self.init_pos, self.vel, self.acc, 0, '', '', '', True)
         self.running_state = 111
         rospy.loginfo("移动到初始位置: %s" % self.init_pos)
@@ -1778,8 +1688,6 @@ class system_control:
                     self.ob_status = 1
                     self.running_state = 110
                     self.duco_cobot.movel(self.init_pos, self.vel, self.acc, 0, '', '', '', True)
-
-                    # self.duco_cobot.servoj_pose(self.init_pos, self.vel, self.acc, '', '', '', True)
                     self.running_state = 111
                     rospy.loginfo("移动到初始位置")
                     self.paint_motion = 0
@@ -1788,8 +1696,6 @@ class system_control:
                     self.ob_status = 1
                     self.running_state = 120
                     self.duco_cobot.movel(self.serv_pos, self.vel, self.acc, 0, '', '', '', True)
-
-                    # self.duco_cobot.servoj_pose(self.serv_pos, self.vel, self.acc, '', '', '', True)
                     self.running_state = 121
                     rospy.loginfo("移动到维修位置")
                     self.paint_motion = 0
