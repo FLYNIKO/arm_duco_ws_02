@@ -12,9 +12,9 @@ OB_THRESHOLD_M = 0.35 # 中区阈值（左右区绝对值）
 OB_THRESHOLD_U = 0.2 # 上区阈值
 OB_THRESHOLD_D = -0.25 # 下区阈值
 OB_THRESHOLD_FRONT_MID = -0.2 # 前中分界线
-OB_THRESHOLD_MID_REAR = 0.12 # 中后分界线
+OB_THRESHOLD_MID_REAR = 0.1 # 中后分界线
 OB_SAFE_DISTANCE_F = 0.6 # 上、下、前安全距离
-OB_SAFE_DISTANCE = 0.85 # 安全距离
+OB_SAFE_DISTANCE = 0.8 # 安全距离 default=0.85
 OB_FORWARD_MIN = -0.15 # 前方最小距离
 OB_FORWARD_MAX = -2 # 前方最大距离
 
