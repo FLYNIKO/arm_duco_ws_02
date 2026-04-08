@@ -1088,7 +1088,7 @@ class system_control:
         #上翼板
         self.spray_swinging_low = self.compute_spray_swinging_angle([self.paint_low[0], self.paint_low[2]], flange_top_front, [web_top_x, web_top_z])
         #中心点
-        self.spray_swinging_center = self.compute_spray_swinging_angle([self.paint_center[0], self.paint_center[2]], [flange_top_front[0], flange_top_front[1] - 0.05], [flange_bottom_front[0], flange_bottom_front[1] + 0.05])
+        self.spray_swinging_center = self.compute_spray_swinging_angle([self.paint_center[0], self.paint_center[2]], [flange_top_front[0], flange_top_front[1] - 0.1], [flange_bottom_front[0], flange_bottom_front[1]+0.03])
         
         self.spray_swinging = self.spray_swinging_top + self.spray_swinging_low + self.spray_swinging_center + self.spray_swinging_high + self.spray_swinging_bottom
         rospy.loginfo("------ |-| 已找到5个喷涂位姿，选择位置开始喷涂！--------\n")
@@ -1359,7 +1359,7 @@ class system_control:
                 if self.paint_motion == 2 or self.paint_motion == 4:
                     target_dist = self.painting_dist
                     if self.car_direction == 0:
-                        now_dist = self.get_directional_distance("left")
+                        now_dist = self.get_directional_distance("main") - 0.15
                     elif self.car_direction == 1:
                         now_dist = self.get_directional_distance("right")
                     v2 = self.pid_dist_control(now_dist, target_dist, dt)
@@ -1388,9 +1388,9 @@ class system_control:
                 elif self.paint_motion == 3 or self.paint_motion == 1:
                     target_dist = self.target_dist_in_web
                     if self.car_direction == 0:
-                        now_dist = self.get_directional_distance("left")
+                        now_dist = self.get_directional_distance("main") - 0.15
                     elif self.car_direction == 1:
-                        now_dist = (self.get_directional_distance("right") + self.get_directional_distance("left")) / 2
+                        now_dist = self.get_directional_distance("right")
                     v2 = self.pid_dist_control(now_dist, target_dist, dt)  
                     if not self.ob_flag and abs(target_dist - now_dist) < 0.1:
                         self.esp32_spray_state = 1

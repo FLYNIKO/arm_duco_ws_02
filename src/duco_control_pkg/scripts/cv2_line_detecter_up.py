@@ -21,11 +21,11 @@ class SeparateRadarLineDetector:
         self.debug_mode = DEBUG_MODE
         # Parameters for image conversion
         self.image_size = 800  # 适中的图像尺寸
-        self.max_range = 1.0      # 适中的范围
+        self.max_range = 2.0      # 适中的范围
         self.resolution = self.max_range / (self.image_size / 2)
         
         # 圆形处理范围参数
-        self.processing_radius_meters = 1  # 处理半径（米），只处理此范围内的数据
+        self.processing_radius_meters = 2  # 处理半径（米），只处理此范围内的数据
         self.processing_radius_pixels = int(self.processing_radius_meters / self.resolution)  # 转换为像素
         
         # Enhanced Hough line detection parameters 

@@ -16,7 +16,7 @@ class CylinderAutoPaint:
     def get_cylinder_param(self):
         # TODO: 获取圆柱圆心坐标及半径，可根据实际需求修改
         cx, cy, cz = 1.8, 0.3, 1.2   # 圆心坐标
-        cy_radius = 0.5               # 圆柱半径
+        cy_radius = 0.5              # 圆柱半径
         return cx, cy, cz, cy_radius
 
     def auto_paint(self):
